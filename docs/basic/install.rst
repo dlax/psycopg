@@ -99,6 +99,25 @@ If your build prerequisites are in place you can run::
 
     pip install "psycopg[c]"
 
+.. note::
+   If you're trying to build against a local, non-standard, installation of
+   PostgreSQL (for instance a development version):
+   - the corresponding :program:`pg_config` program must still be available in
+     :envvar:`PATH`, and,
+   - the library search paths must be adjusted to include PostgreSQL library
+     directory (:envvar:`LD_LIBRARY_PATH` including `pg_config --libdir`)
+   - the latter is also needed when running tests
+
+   ::
+
+       $ export PATH=$(pg_config --bindir):$PATH
+       $ export LD_LIBRARY_PATH=$(pg_config --libdir)
+       $ pip install -e ./psycopg_c
+
+       $ python -c 'import psycopg.pq; print(psycopg.pq.__build_version__, psycopg.pq.version())'
+       160000 160000
+
+
 
 .. _pure-python-installation:
 
