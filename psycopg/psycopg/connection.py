@@ -79,6 +79,44 @@ NoticeHandler = Callable[[e.Diagnostic], None]
 NotifyHandler = Callable[[Notify], None]
 
 
+class BasePipeline:
+    def __init__(self, pgconn: "PGconn") -> None:
+        self.pgconn = pgconn
+
+    @property
+    def status(self) -> pq.PipelineStatus:
+        return pq.PipelineStatus(self.pgconn.pipeline_status)
+
+    def _sync(self) -> None:
+        self.pgconn.pipeline_sync()
+
+    def _enter(self) -> None:
+        self.pgconn.enter_pipeline_mode()
+
+    def _exit(self) -> None:
+        self.pgconn.exit_pipeline_mode()
+
+
+class Pipeline(BasePipeline):
+    """Handler for connection in pipeline mode."""
+
+    def __enter__(self) -> "Pipeline":
+        self._enter()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        self._exit()
+
+    def sync(self) -> None:
+        """Mark a synchronization point in the pipeline."""
+        self._sync()
+
+
 class BaseConnection(Generic[Row]):
     """
     Base class for different types of connections.
@@ -848,6 +886,15 @@ class Connection(BaseConnection[Row]):
                     pgn.relname.decode(enc), pgn.extra.decode(enc), pgn.be_pid
                 )
                 yield n
+
+    @contextmanager
+    def pipeline(self) -> Iterator[Pipeline]:
+        """Context manager to switch the connection into pipeline mode.
+
+        :rtype: Pipeline
+        """
+        with Pipeline(self.pgconn) as pipeline:
+            yield pipeline
 
     def wait(self, gen: PQGen[RV], timeout: Optional[float] = 0.1) -> RV:
         """

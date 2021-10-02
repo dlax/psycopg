@@ -22,7 +22,7 @@ from ._enums import IsolationLevel
 from ._compat import asynccontextmanager, get_running_loop
 from .conninfo import make_conninfo, conninfo_to_dict
 from ._encodings import pgconn_encoding
-from .connection import BaseConnection, CursorRow, Notify
+from .connection import BaseConnection, BasePipeline, CursorRow, Notify
 from .generators import notifies
 from .transaction import AsyncTransaction
 from .cursor_async import AsyncCursor
@@ -33,6 +33,26 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("psycopg")
+
+
+class AsyncPipeline(BasePipeline):
+    """Handler for async connection in pipeline mode."""
+
+    async def __aenter__(self) -> "AsyncPipeline":
+        self._enter()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        self._exit()
+
+    async def sync(self) -> None:
+        """Mark a synchronization point in the pipeline."""
+        self._sync()
 
 
 class AsyncConnection(BaseConnection[Row]):
@@ -286,6 +306,15 @@ class AsyncConnection(BaseConnection[Row]):
                     pgn.relname.decode(enc), pgn.extra.decode(enc), pgn.be_pid
                 )
                 yield n
+
+    @asynccontextmanager
+    async def pipeline(self) -> AsyncIterator[AsyncPipeline]:
+        """Context manager to switch the connection into pipeline mode.
+
+        :rtype: AsyncPipeline
+        """
+        async with AsyncPipeline(self.pgconn) as pipeline:
+            yield pipeline
 
     async def wait(self, gen: PQGen[RV]) -> RV:
         return await waiting.wait_async(gen, self.pgconn.socket)
