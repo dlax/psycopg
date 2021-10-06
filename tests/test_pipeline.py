@@ -1,5 +1,6 @@
 import pytest
 
+import psycopg
 from psycopg import pq
 
 pytestmark = pytest.mark.libpq(">= 14")
@@ -14,3 +15,9 @@ def test_pipeline_status(conn):
         r = conn.pgconn.get_result()
         assert r is None
     assert p.status == pq.PipelineStatus.OFF
+
+
+def test_cursor_stream(conn):
+    with conn.pipeline(), conn.cursor() as cur:
+        with pytest.raises(psycopg.ProgrammingError):
+            cur.stream("select 1").__next__()
