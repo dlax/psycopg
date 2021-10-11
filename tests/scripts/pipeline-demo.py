@@ -221,6 +221,56 @@ def _pipeline_demo_pq(
             handler.process_results(fetched)
 
 
+def pipeline_demo(rows_to_send: int, logger: logging.Logger) -> None:
+    """Pipeline demo using sync API."""
+    conn = Connection.connect()
+    conn.autocommit = True
+    conn.pgconn = LoggingPGconn(conn.pgconn, logger)  # type: ignore[assignment]
+    with conn.pipeline() as pipeline:
+        with conn.transaction():
+            conn.execute("DROP TABLE IF EXISTS pq_pipeline_demo")
+            conn.execute(
+                "CREATE UNLOGGED TABLE pq_pipeline_demo("
+                " id serial primary key,"
+                " itemno integer,"
+                " int8filler int8"
+                ")"
+            )
+            for r in range(rows_to_send, 0, -1):
+                conn.execute(
+                    "INSERT INTO pq_pipeline_demo(itemno, int8filler)"
+                    " VALUES (%s, %s)",
+                    (r, 1 << 62),
+                )
+        pipeline.sync()
+
+
+async def pipeline_demo_async(
+    rows_to_send: int, logger: logging.Logger
+) -> None:
+    """Pipeline demo using async API."""
+    aconn = await AsyncConnection.connect()
+    await aconn.set_autocommit(True)
+    aconn.pgconn = LoggingPGconn(aconn.pgconn, logger)  # type: ignore[assignment]
+    async with aconn.pipeline() as pipeline:
+        async with aconn.transaction():
+            await aconn.execute("DROP TABLE IF EXISTS pq_pipeline_demo")
+            await aconn.execute(
+                "CREATE UNLOGGED TABLE pq_pipeline_demo("
+                " id serial primary key,"
+                " itemno integer,"
+                " int8filler int8"
+                ")"
+            )
+            for r in range(rows_to_send, 0, -1):
+                await aconn.execute(
+                    "INSERT INTO pq_pipeline_demo(itemno, int8filler)"
+                    " VALUES (%s, %s)",
+                    (r, 1 << 62),
+                )
+        await pipeline.sync()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -230,6 +280,9 @@ def main() -> None:
         default=10_000,
         type=int,
         help="number of rows to insert",
+    )
+    parser.add_argument(
+        "--pq", action="store_true", help="use low-level psycopg.pq API"
     )
     parser.add_argument(
         "--async", dest="async_", action="store_true", help="use async API"
@@ -247,9 +300,15 @@ def main() -> None:
         logger.addHandler(logging.StreamHandler())
         pipeline_logger.addHandler(logging.StreamHandler())
     if args.async_:
-        asyncio.run(pipeline_demo_pq_async(args.nrows, pipeline_logger))
+        if args.pq:
+            asyncio.run(pipeline_demo_pq_async(args.nrows, pipeline_logger))
+        else:
+            asyncio.run(pipeline_demo_async(args.nrows, pipeline_logger))
     else:
-        pipeline_demo_pq(args.nrows, pipeline_logger)
+        if args.pq:
+            pipeline_demo_pq(args.nrows, pipeline_logger)
+        else:
+            pipeline_demo(args.nrows, pipeline_logger)
 
 
 if __name__ == "__main__":

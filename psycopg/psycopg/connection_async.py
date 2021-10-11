@@ -13,7 +13,7 @@ from typing import Type, Union, cast, overload, TYPE_CHECKING
 
 from . import errors as e
 from . import waiting
-from .pq import Format, TransactionStatus
+from .pq import Format, PipelineStatus, TransactionStatus
 from .abc import AdaptContext, Params, PQGen, PQGenConn, Query, RV
 from ._tpc import Xid
 from .rows import Row, AsyncRowFactory, tuple_row, TupleRow, args_row
@@ -313,8 +313,21 @@ class AsyncConnection(BaseConnection[Row]):
 
         :rtype: AsyncPipeline
         """
-        async with AsyncPipeline(self.pgconn) as pipeline:
-            yield pipeline
+        pipeline = self._pipeline = AsyncPipeline(self.pgconn)
+        try:
+            async with pipeline:
+                try:
+                    yield pipeline
+                finally:
+                    async with self.lock:
+                        # Send an pending commands (e.g. COMMIT),
+                        if pipeline.command_queue:
+                            await self.wait(pipeline._communicate_gen())
+                        # then fetch all remaining results.
+                        await self.wait(pipeline._fetch_gen(flush=True))
+        finally:
+            assert pipeline.status == PipelineStatus.OFF, pipeline.status
+            self._pipeline = None
 
     async def wait(self, gen: PQGen[RV]) -> RV:
         return await waiting.wait_async(gen, self.pgconn.socket)

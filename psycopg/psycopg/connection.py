@@ -20,7 +20,7 @@ from . import errors as e
 from . import waiting
 from . import postgres
 from .pq import ConnStatus, ExecStatus, TransactionStatus, Format
-from .abc import AdaptContext, ConnectionType, Params, Query, RV
+from .abc import AdaptContext, Command, ConnectionType, Params, Query, RV
 from .abc import PQGen, PQGenConn
 from .sql import Composable, SQL
 from ._tpc import Xid
@@ -28,16 +28,18 @@ from .rows import Row, RowFactory, tuple_row, TupleRow, args_row
 from .adapt import AdaptersMap
 from ._enums import IsolationLevel
 from .cursor import Cursor
+from ._compat import Deque
 from ._cmodule import _psycopg
 from .conninfo import make_conninfo, conninfo_to_dict, ConnectionInfo
 from .generators import notifies
 from ._encodings import pgconn_encoding
-from ._preparing import PrepareManager
+from ._preparing import Key, Prepare, PrepareManager
 from .transaction import Transaction
 from .server_cursor import ServerCursor
 
 if TYPE_CHECKING:
     from .pq.abc import PGconn, PGresult
+    from .cursor import BaseCursor
     from psycopg_pool.base import BasePool
 
 logger = logging.getLogger("psycopg")
@@ -52,12 +54,18 @@ CursorRow = TypeVar("CursorRow")
 if _psycopg:
     connect = _psycopg.connect
     execute = _psycopg.execute
+    fetch_many = _psycopg.fetch_many
+    pipeline_communicate = _psycopg.pipeline_communicate
+    send = _psycopg.send
 
 else:
     from . import generators
 
     connect = generators.connect
     execute = generators.execute
+    fetch_many = generators.fetch_many
+    pipeline_communicate = generators.pipeline_communicate
+    send = generators.send
 
 
 class Notify(NamedTuple):
@@ -78,10 +86,20 @@ Notify.__module__ = "psycopg"
 NoticeHandler = Callable[[e.Diagnostic], None]
 NotifyHandler = Callable[[Notify], None]
 
+PipelineQueueItem = Union[
+    None,
+    Tuple[
+        "BaseCursor[Any, Any]",
+        Optional[Tuple[Key, Prepare, bytes]],
+    ],
+]
+
 
 class BasePipeline:
     def __init__(self, pgconn: "PGconn") -> None:
         self.pgconn = pgconn
+        self.command_queue = Deque[Command]()
+        self.result_queue = Deque[PipelineQueueItem]()
 
     @property
     def status(self) -> pq.PipelineStatus:
@@ -89,6 +107,73 @@ class BasePipeline:
 
     def _sync(self) -> None:
         self.pgconn.pipeline_sync()
+        self.result_queue.append(None)
+
+    def _communicate_gen(self) -> PQGen[None]:
+        """Communicate with pipeline to send commands and possibly fetch
+        results, which are then processed.
+        """
+        assert self.command_queue
+        fetched = yield from pipeline_communicate(
+            self.pgconn, self.command_queue
+        )
+        for results in fetched:
+            self._process_results(self.result_queue.popleft(), results)
+
+    def _fetch_gen(self, *, flush: bool) -> PQGen[None]:
+        """Fetch available results from the connection and process them with
+        pipeline queued items.
+
+        If 'flush' is True, a PQsendFlushRequest() is issued in order to make
+        sure results can be fetched. Otherwise, the caller may emit a
+        PQpipelineSync() call to ensure the output buffer gets flushed before
+        fetching.
+        """
+        if not self.result_queue:
+            return
+
+        if flush:
+            self.pgconn.send_flush_request()
+            yield from send(self.pgconn)
+
+        fetched = []
+        while self.result_queue:
+            results = yield from fetch_many(self.pgconn)
+            if not results:
+                # No more results to fetch, but there may still be pending
+                # commands.
+                break
+            queued = self.result_queue.popleft()
+            fetched.append((queued, results))
+
+        for queued, results in fetched:
+            self._process_results(queued, results)
+
+    def _process_results(
+        self, queued: PipelineQueueItem, results: List["PGresult"]
+    ) -> None:
+        """Process a results set fetched from the current pipeline.
+
+        This matchs 'results' with its respective element in the pipeline
+        queue. For commands (None value in the pipeline queue), results are
+        checked directly. For prepare statement creation requests, update the
+        cache. Otherwise, results are attached to their respective cursor.
+        """
+        if queued is None:
+            (result,) = results
+            if result.status == ExecStatus.FATAL_ERROR:
+                raise e.error_from_result(
+                    result, encoding=pgconn_encoding(self.pgconn)
+                )
+            elif result.status == ExecStatus.PIPELINE_ABORTED:
+                raise e.OperationalError("pipeline aborted")
+        else:
+            cursor, prepinfo = queued
+            cursor._execute_results(results)
+            if prepinfo:
+                key, prep, name = prepinfo
+                # Update the prepare state of the query.
+                cursor._conn._prepared.validate(key, prep, name, results)
 
     def _enter(self) -> None:
         self.pgconn.enter_pipeline_mode()
@@ -164,6 +249,8 @@ class BaseConnection(Generic[Row]):
         # Attribute is only set if the connection is from a pool so we can tell
         # apart a connection in the pool too (when _pool = None)
         self._pool: Optional["BasePool[Any]"]
+
+        self._pipeline: Optional[BasePipeline] = None
 
         # Time after which the connection should be closed
         self._expire_at: float
@@ -442,7 +529,7 @@ class BaseConnection(Generic[Row]):
 
     def _exec_command(
         self, command: Query, result_format: Format = Format.TEXT
-    ) -> PQGen["PGresult"]:
+    ) -> PQGen[Optional["PGresult"]]:
         """
         Generator to send a command and receive the result to the backend.
 
@@ -461,6 +548,20 @@ class BaseConnection(Generic[Row]):
             command = command.encode(pgconn_encoding(self.pgconn))
         elif isinstance(command, Composable):
             command = command.as_bytes(self)
+
+        if self._pipeline:
+            if result_format == Format.TEXT:
+                cmd = partial(self.pgconn.send_query, command)
+            else:
+                cmd = partial(
+                    self.pgconn.send_query_params,
+                    command,
+                    None,
+                    result_format=result_format,
+                )
+            self._pipeline.command_queue.append(cmd)
+            self._pipeline.result_queue.append(None)
+            return None
 
         if result_format == Format.TEXT:
             self.pgconn.send_query(command)
@@ -893,8 +994,21 @@ class Connection(BaseConnection[Row]):
 
         :rtype: Pipeline
         """
-        with Pipeline(self.pgconn) as pipeline:
-            yield pipeline
+        pipeline = self._pipeline = Pipeline(self.pgconn)
+        try:
+            with pipeline:
+                try:
+                    yield pipeline
+                finally:
+                    with self.lock:
+                        # Send an pending commands (e.g. COMMIT),
+                        if pipeline.command_queue:
+                            self.wait(pipeline._communicate_gen())
+                        # then fetch all remaining results.
+                        self.wait(pipeline._fetch_gen(flush=True))
+        finally:
+            assert pipeline.status == pq.PipelineStatus.OFF, pipeline.status
+            self._pipeline = None
 
     def wait(self, gen: PQGen[RV], timeout: Optional[float] = 0.1) -> RV:
         """
