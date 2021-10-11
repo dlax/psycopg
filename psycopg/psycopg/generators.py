@@ -21,9 +21,10 @@ from typing import List, Optional, Union
 from . import pq
 from . import errors as e
 from .pq import ConnStatus, PollingStatus, ExecStatus
-from .abc import PQGen, PQGenConn
+from .abc import Command, PQGen, PQGenConn
 from .pq.abc import PGconn, PGresult
 from .waiting import Wait, Ready
+from ._compat import Deque
 from ._encodings import py_codecs
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,67 @@ def fetch(pgconn: PGconn) -> PQGen[Optional[PGresult]]:
             pgconn.notify_handler(n)
 
     return pgconn.get_result()
+
+
+def pipeline_communicate(
+    pgconn: PGconn, commands: Deque[Command]
+) -> PQGen[List[List[PGresult]]]:
+    """Generator to send queries from a connection in pipeline mode while also
+    receiving results.
+
+    Return a list results, including single PIPELINE_SYNC elements.
+
+    We wait for the connection socket to be read-ready or write-ready.
+    If read-ready, the server output buffer will be consumed completely until
+    no more results are available. Then, if write-ready, the client buffer
+    will be flushed the function returns.
+
+    When the client buffer got flushed but the socket is not read-ready,
+    meaning we cannot get results from the server, this will return no
+    results. In that case, the caller should issue pgconn.send_flush_request()
+    or pgconn.pipeline_sync() and retry, or wait for the server to flush its
+    output buffer.
+    """
+    results = []
+
+    while True:
+        ready = yield Wait.RW
+
+        if ready & Ready.R:
+            # This requires that the server has its output buffer flushed,
+            # which happens either automatically upon PQpipelineSync() or by
+            # calling PQsendFlushRequest().
+            pgconn.consume_input()
+
+            # Consume notifies
+            while True:
+                n = pgconn.notifies()
+                if not n:
+                    break
+                if pgconn.notify_handler:
+                    pgconn.notify_handler(n)
+
+            res: List[PGresult] = []
+            while not pgconn.is_busy():
+                r = pgconn.get_result()
+                if r is None:
+                    if not res:
+                        break
+                    results.append(res)
+                    res = []
+                elif r.status == pq.ExecStatus.PIPELINE_SYNC:
+                    assert not res
+                    results.append([r])
+                else:
+                    res.append(r)
+
+        if ready & Ready.W:
+            pgconn.flush()
+            if not commands:
+                break
+            commands.popleft()()
+
+    return results
 
 
 _copy_statuses = (

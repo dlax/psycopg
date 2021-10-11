@@ -26,6 +26,7 @@ Buffer = Union[bytes, bytearray, memoryview]
 Query = Union[str, bytes, "Composable"]
 Params = Union[Sequence[Any], Mapping[str, Any]]
 ConnectionType = TypeVar("ConnectionType", bound="BaseConnection[Any]")
+Command = Callable[[], None]
 
 # TODO: make it recursive when mypy will support it
 # DumperKey = Union[type, Tuple[Union[type, "DumperKey"]]]
