@@ -108,7 +108,7 @@ def test_wait_epoll_bad(pgconn):
 @pytest.mark.anyio
 async def test_wait_conn_async(dsn, timeout):
     gen = generators.connect(dsn)
-    conn = await waiting.wait_conn_async(gen, **timeout)
+    conn = await waiting.wait_conn_asyncio(gen, **timeout)
     assert conn.status == ConnStatus.OK
 
 
@@ -116,14 +116,14 @@ async def test_wait_conn_async(dsn, timeout):
 async def test_wait_conn_async_bad(dsn):
     gen = generators.connect("dbname=nosuchdb")
     with pytest.raises(psycopg.OperationalError):
-        await waiting.wait_conn_async(gen)
+        await waiting.wait_conn_asyncio(gen)
 
 
 @pytest.mark.anyio
 async def test_wait_async(pgconn):
     pgconn.send_query(b"select 1")
     gen = generators.execute(pgconn)
-    (res,) = await waiting.wait_async(gen, pgconn.socket)
+    (res,) = await waiting.wait_asyncio(gen, pgconn.socket)
     assert res.status == ExecStatus.TUPLES_OK
 
 
@@ -136,7 +136,7 @@ async def test_wait_ready_async(wait, ready):
         return r
 
     with socket.socket() as s:
-        r = await waiting.wait_async(gen(), s.fileno())
+        r = await waiting.wait_asyncio(gen(), s.fileno())
     assert r & ready
 
 
@@ -147,4 +147,4 @@ async def test_wait_async_bad(pgconn):
     socket = pgconn.socket
     pgconn.finish()
     with pytest.raises(psycopg.OperationalError):
-        await waiting.wait_async(gen, socket)
+        await waiting.wait_asyncio(gen, socket)
