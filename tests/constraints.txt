@@ -8,7 +8,7 @@ backports.zoneinfo == 0.2.0
 typing-extensions == 4.1.0
 
 # From the 'test' extra
-anyio == 3.6.1
+anyio[trio] == 3.6.1
 mypy == 0.940
 pproxy == 2.7.0
 pytest == 6.2.5

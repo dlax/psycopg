@@ -37,7 +37,7 @@ extras_require = {
     ],
     # Requirements to run the test suite
     "test": [
-        "anyio >= 3.6.1",
+        "anyio[trio] >= 3.6.1",
         "mypy >= 0.940",
         "pproxy >= 2.7",
         "pytest >= 6.2.5",
