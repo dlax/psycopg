@@ -1,6 +1,5 @@
 import sys
 import logging
-import weakref
 from time import sleep, time
 from threading import Thread, Event
 from typing import Any, List, Tuple
@@ -561,14 +560,13 @@ def test_fail_rollback_close(dsn, caplog, monkeypatch):
 
 def test_close_no_threads(dsn):
     p = pool.ConnectionPool(dsn)
-    assert p._sched_runner.is_alive()
-    for t in p._workers:
-        assert t.is_alive()
+    with p:
+        assert p._sched_runner and p._sched_runner.is_alive()
+        for t in p._workers:
+            assert t.is_alive()
 
-    p.close()
-    assert not p._sched_runner.is_alive()
-    for t in p._workers:
-        assert not t.is_alive()
+    assert not p._sched_runner
+    assert not p._workers
 
 
 def test_putconn_no_pool(dsn):
@@ -588,36 +586,20 @@ def test_putconn_wrong_pool(dsn):
                 p2.putconn(conn)
 
 
-def test_del_no_warning(dsn, recwarn):
-    p = pool.ConnectionPool(dsn, min_size=2)
-    with p.connection() as conn:
-        conn.execute("select 1")
-
-    p.wait()
-    ref = weakref.ref(p)
-    del p
-    assert not ref()
-    assert not recwarn, [str(w.message) for w in recwarn.list]
-
-
-@pytest.mark.slow
-def test_del_stop_threads(dsn):
-    p = pool.ConnectionPool(dsn)
-    ts = [p._sched_runner] + p._workers
-    del p
-    sleep(0.1)
-    for t in ts:
-        assert not t.is_alive()
-
-
 def test_closed_getconn(dsn):
     p = pool.ConnectionPool(dsn, min_size=1)
-    assert not p.closed
-    with p.connection():
-        pass
-
-    p.close()
     assert p.closed
+    with p:
+        assert not p.closed
+        with p.connection():
+            pass
+
+        p.close()
+        assert p.closed
+
+        with pytest.raises(pool.PoolClosed):
+            with p.connection():
+                pass
 
     with pytest.raises(pool.PoolClosed):
         with p.connection():
@@ -627,11 +609,12 @@ def test_closed_getconn(dsn):
 def test_closed_putconn(dsn):
     p = pool.ConnectionPool(dsn, min_size=1)
 
-    with p.connection() as conn:
-        pass
-    assert not conn.closed
+    with p:
+        with p.connection() as conn:
+            pass
+        assert not conn.closed
 
-    with p.connection() as conn:
+    with p, p.connection() as conn:
         p.close()
     assert conn.closed
 
@@ -655,22 +638,22 @@ def test_closed_queue(dsn):
     e1 = Event()
     e2 = Event()
 
-    p = pool.ConnectionPool(dsn, min_size=1)
-    p.wait()
-    success: List[str] = []
+    with pool.ConnectionPool(dsn, min_size=1) as p:
+        p.wait()
+        success: List[str] = []
 
-    t1 = Thread(target=w1)
-    t1.start()
-    # Wait until w1 has received a connection
-    e1.wait()
+        t1 = Thread(target=w1)
+        t1.start()
+        # Wait until w1 has received a connection
+        e1.wait()
 
-    t2 = Thread(target=w2)
-    t2.start()
-    # Wait until w2 is in the queue
-    while not p._waiting:
-        sleep(0)
+        t2 = Thread(target=w2)
+        t2.start()
+        # Wait until w2 is in the queue
+        while not p._waiting:
+            sleep(0)
 
-    p.close(0)
+        p.close(0)
 
     # Wait for the workers to finish
     e2.set()
