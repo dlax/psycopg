@@ -57,30 +57,11 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         self._pool_full_event: Optional[asyncio.Event] = None
 
         self._sched = AsyncScheduler()
+        self._sched_runner: Optional[Task[None]] = None
         self._tasks: "asyncio.Queue[MaintenanceTask]" = asyncio.Queue()
         self._workers: List[Task[None]] = []
 
         super().__init__(conninfo, **kwargs)
-
-        self._sched_runner = create_task(
-            self._sched.run(), name=f"{self.name}-scheduler"
-        )
-        for i in range(self.num_workers):
-            t = create_task(
-                self.worker(self._tasks),
-                name=f"{self.name}-worker-{i}",
-            )
-            self._workers.append(t)
-
-        # populate the pool with initial min_size connections in background
-        for i in range(self._nconns):
-            self.run_task(AddConnection(self))
-
-        # Schedule a task to shrink the pool if connections over min_size have
-        # remained unused.
-        self.run_task(Schedule(self, ShrinkPool(self), self.max_idle))
-
-        self._closed = False
 
     async def wait(self, timeout: float = 30.0) -> None:
         async with self._lock:
@@ -230,6 +211,7 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         # Stop the worker threads
         for w in self._workers:
             self.run_task(StopWorker(self))
+        self._workers.clear()
 
         # Signal to eventual clients in the queue that business is closed.
         for pos in waiting:
@@ -240,6 +222,7 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
             await conn.close()
 
         # Wait for the worker threads to terminate
+        assert self._sched_runner is not None
         wait = asyncio.gather(self._sched_runner, *self._workers)
         if timeout > 0:
             wait = asyncio.wait_for(asyncio.shield(wait), timeout=timeout)
@@ -251,8 +234,28 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
                 self.name,
                 timeout,
             )
+        self._sched_runner = None
 
     async def __aenter__(self) -> "AsyncConnectionPool":
+        self._sched_runner = create_task(
+            self._sched.run(), name=f"{self.name}-scheduler"
+        )
+        for i in range(self.num_workers):
+            t = create_task(
+                self.worker(self._tasks),
+                name=f"{self.name}-worker-{i}",
+            )
+            self._workers.append(t)
+
+        # populate the pool with initial min_size connections in background
+        for i in range(self._nconns):
+            self.run_task(AddConnection(self))
+
+        # Schedule a task to shrink the pool if connections over min_size have
+        # remained unused.
+        self.run_task(Schedule(self, ShrinkPool(self), self.max_idle))
+
+        self._closed = False
         return self
 
     async def __aexit__(

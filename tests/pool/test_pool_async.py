@@ -576,14 +576,13 @@ async def test_fail_rollback_close(dsn, caplog, monkeypatch):
 
 async def test_close_no_tasks(dsn):
     p = pool.AsyncConnectionPool(dsn)
-    assert not p._sched_runner.done()
-    for t in p._workers:
-        assert not t.done()
+    async with p:
+        assert p._sched_runner and not p._sched_runner.done()
+        for t in p._workers:
+            assert not t.done()
 
-    await p.close()
-    assert p._sched_runner.done()
-    for t in p._workers:
-        assert t.done()
+    assert not p._sched_runner
+    assert not p._workers
 
 
 async def test_putconn_no_pool(dsn):
@@ -605,12 +604,18 @@ async def test_putconn_wrong_pool(dsn):
 
 async def test_closed_getconn(dsn):
     p = pool.AsyncConnectionPool(dsn, min_size=1)
-    assert not p.closed
-    async with p.connection():
-        pass
-
-    await p.close()
     assert p.closed
+    async with p:
+        assert not p.closed
+        async with p.connection():
+            pass
+
+        await p.close()
+        assert p.closed
+
+        with pytest.raises(pool.PoolClosed):
+            async with p.connection():
+                pass
 
     with pytest.raises(pool.PoolClosed):
         async with p.connection():
@@ -620,11 +625,12 @@ async def test_closed_getconn(dsn):
 async def test_closed_putconn(dsn):
     p = pool.AsyncConnectionPool(dsn, min_size=1)
 
-    async with p.connection() as conn:
-        pass
-    assert not conn.closed
+    async with p:
+        async with p.connection() as conn:
+            pass
+        assert not conn.closed
 
-    async with p.connection() as conn:
+    async with p, p.connection() as conn:
         await p.close()
     assert conn.closed
 
@@ -648,20 +654,18 @@ async def test_closed_queue(dsn):
     e1 = asyncio.Event()
     e2 = asyncio.Event()
 
-    p = pool.AsyncConnectionPool(dsn, min_size=1)
-    await p.wait()
-    success: List[str] = []
+    async with pool.AsyncConnectionPool(dsn, min_size=1) as p:
+        await p.wait()
+        success: List[str] = []
 
-    t1 = create_task(w1())
-    # Wait until w1 has received a connection
-    await e1.wait()
+        t1 = create_task(w1())
+        # Wait until w1 has received a connection
+        await e1.wait()
 
-    t2 = create_task(w2())
-    # Wait until w2 is in the queue
-    while not p._waiting:
-        await asyncio.sleep(0)
-
-    await p.close()
+        t2 = create_task(w2())
+        # Wait until w2 is in the queue
+        while not p._waiting:
+            await asyncio.sleep(0)
 
     # Wait for the workers to finish
     e2.set()
