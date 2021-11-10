@@ -59,6 +59,7 @@ extras_require = {
         "furo == 2022.6.21",
         "sphinx-autobuild >= 2021.3.14",
         "sphinx-autodoc-typehints >= 1.12",
+        "anyio",
     ],
 }
 

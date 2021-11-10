@@ -19,6 +19,7 @@ from psycopg.adapt import PyFormat
 from psycopg.types.hstore import register_hstore
 from psycopg.types.numeric import Int4
 
+from .conftest import asyncio_options
 from .utils import alist, eur, gc_collect
 from .test_copy import sample_text, sample_binary, sample_binary_rows  # noqa
 from .test_copy import sample_values, sample_records, sample_tabledef
@@ -27,6 +28,17 @@ from .test_copy import py_to_raw, special_chars
 pytestmark = [
     pytest.mark.crdb_skip("copy"),
 ]
+
+
+@pytest.fixture(
+    params=[pytest.param(("asyncio", asyncio_options.copy()), id="asyncio")],
+    scope="session",
+)
+def anyio_backend(request):
+    backend, options = request.param
+    if request.config.option.loop == "uvloop":
+        options["use_uvloop"] = True
+    return backend, options
 
 
 @pytest.mark.parametrize("format", Format)

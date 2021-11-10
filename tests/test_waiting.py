@@ -9,7 +9,6 @@ from psycopg import waiting
 from psycopg import generators
 from psycopg.pq import ConnStatus, ExecStatus
 
-from .conftest import asyncio_options
 
 hasepoll = hasattr(select, "epoll")
 skip_no_epoll = pytest.mark.skipif(not hasepoll, reason="epoll not available")
@@ -103,19 +102,6 @@ def test_wait_epoll_bad(pgconn):
     gen = generators.execute(pgconn)
     (res,) = waiting.wait_epoll(gen, pgconn.socket)
     assert res.status == ExecStatus.TUPLES_OK
-
-
-@pytest.fixture(
-    params=[
-        pytest.param(("asyncio", asyncio_options.copy()), id="asyncio"),
-        pytest.param(("trio", {}), id="trio"),
-    ]
-)
-def anyio_backend(request):
-    backend, options = request.param
-    if request.config.option.loop == "uvloop":
-        options["use_uvloop"] = True
-    return backend, options
 
 
 @pytest.fixture

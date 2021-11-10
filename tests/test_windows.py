@@ -6,7 +6,8 @@ from psycopg.errors import InterfaceError
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="windows only test")
-def test_windows_error(aconn_cls, dsn):
+@pytest.mark.parametrize("anyio_backend", ["asyncio"], scope="session")
+def test_windows_error(aconn_cls, dsn, anyio_backend):
     loop = asyncio.ProactorEventLoop()  # type: ignore[attr-defined]
 
     async def go():

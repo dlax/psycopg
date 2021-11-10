@@ -26,6 +26,13 @@ from .server_cursor import AsyncServerCursor, ServerCursor
 from .client_cursor import AsyncClientCursor, ClientCursor
 from .connection_async import AsyncConnection
 
+try:
+    from .connection_async import AnyIOConnection  # noqa: F401
+except ImportError:
+    _anyio = False
+else:
+    _anyio = True
+
 from . import dbapi20
 from .dbapi20 import BINARY, DATETIME, NUMBER, ROWID, STRING
 from .dbapi20 import Binary, Date, DateFromTicks, Time, TimeFromTicks
@@ -108,3 +115,5 @@ __all__ = [
     "ROWID",
     "STRING",
 ]
+if _anyio:
+    __all__.append("AnyIOConnection")

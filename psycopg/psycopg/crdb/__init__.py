@@ -7,6 +7,13 @@ CockroachDB support package.
 from . import _types
 from .connection import CrdbConnection, AsyncCrdbConnection, CrdbConnectionInfo
 
+try:
+    from .connection import AnyIOCrdbConnection  # noqa: F401
+except ImportError:
+    _anyio = False
+else:
+    _anyio = True
+
 adapters = _types.adapters  # exposed by the package
 connect = CrdbConnection.connect
 
@@ -17,3 +24,5 @@ __all__ = [
     "CrdbConnection",
     "CrdbConnectionInfo",
 ]
+if _anyio:
+    __all__.append("AnyIOCrdbConnection")

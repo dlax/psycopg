@@ -149,6 +149,61 @@ class AsyncCrdbConnection(_CrdbConnectionMixin, AsyncConnection[Row]):
         return await super().connect(conninfo, **kwargs)  # type: ignore [no-any-return]
 
 
+try:
+    from ..connection_async import AnyIOConnection
+except ImportError:
+    pass
+else:
+
+    class AnyIOCrdbConnection(_CrdbConnectionMixin, AnyIOConnection[Row]):
+        """
+        Wrapper for an async connection to a CockroachDB database using AnyIO
+        asynchronous library.
+        """
+
+        __module__ = "psycopg.crdb"
+
+        # TODO: this method shouldn't require re-definition if the base class
+        # implements a generic self.
+        # https://github.com/psycopg/psycopg/issues/308
+        @overload
+        @classmethod
+        async def connect(
+            cls,
+            conninfo: str = "",
+            *,
+            autocommit: bool = False,
+            prepare_threshold: Optional[int] = 5,
+            row_factory: AsyncRowFactory[Row],
+            cursor_factory: "Optional[Type[AsyncCursor[Row]]]" = None,
+            context: Optional[AdaptContext] = None,
+            **kwargs: Union[None, int, str],
+        ) -> "AnyIOCrdbConnection[Row]":
+            ...
+
+        @overload
+        @classmethod
+        async def connect(
+            cls,
+            conninfo: str = "",
+            *,
+            autocommit: bool = False,
+            prepare_threshold: Optional[int] = 5,
+            cursor_factory: "Optional[Type[AsyncCursor[Any]]]" = None,
+            context: Optional[AdaptContext] = None,
+            **kwargs: Union[None, int, str],
+        ) -> "AnyIOCrdbConnection[TupleRow]":
+            ...
+
+        @classmethod
+        async def connect(
+            cls, conninfo: str = "", **kwargs: Any
+        ) -> "AnyIOCrdbConnection[Any]":
+            return await super().connect(  # type: ignore [no-any-return]
+                conninfo, **kwargs
+            )
+
+
 class CrdbConnectionInfo(ConnectionInfo):
     """
     `~psycopg.ConnectionInfo` subclass to get info about a CockroachDB database.
