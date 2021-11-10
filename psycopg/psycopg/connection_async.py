@@ -5,11 +5,13 @@ psycopg async connection objects
 # Copyright (C) 2020-2021 The Psycopg Team
 
 import sys
-import asyncio
 import logging
 from types import TracebackType
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional
 from typing import Type, Union, cast, overload, TYPE_CHECKING
+
+import anyio
+import sniffio
 
 from . import errors as e
 from . import waiting
@@ -18,7 +20,7 @@ from .abc import AdaptContext, Params, PQGen, PQGenConn, Query, RV
 from .rows import Row, AsyncRowFactory, tuple_row, TupleRow
 from .adapt import AdaptersMap
 from ._enums import IsolationLevel
-from ._compat import asynccontextmanager, get_running_loop
+from ._compat import asynccontextmanager
 from .conninfo import make_conninfo, conninfo_to_dict
 from ._encodings import pgconn_encoding
 from .connection import BaseConnection, CursorRow, Notify
@@ -52,7 +54,7 @@ class AsyncConnection(BaseConnection[Row]):
     ):
         super().__init__(pgconn)
         self.row_factory = row_factory or cast(AsyncRowFactory[Row], tuple_row)
-        self.lock = asyncio.Lock()
+        self.lock = anyio.Lock()
         self.cursor_factory = AsyncCursor
         self.server_cursor_factory = AsyncServerCursor
 
@@ -92,7 +94,13 @@ class AsyncConnection(BaseConnection[Row]):
         **kwargs: Any,
     ) -> "AsyncConnection[Any]":
 
-        if sys.platform == "win32":
+        if (
+            sys.platform == "win32"
+            and sniffio.current_async_library() == "asyncio"
+        ):
+            import asyncio
+            from ._compat import get_running_loop
+
             loop = get_running_loop()
             if isinstance(loop, asyncio.ProactorEventLoop):
                 raise e.InterfaceError(
