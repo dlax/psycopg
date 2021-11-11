@@ -5,14 +5,16 @@ psycopg asynchronous connection pool
 # Copyright (C) 2021 The Psycopg Team
 
 import sys
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from time import monotonic
 from types import TracebackType
 from typing import Any, AsyncIterator, Awaitable, Callable
-from typing import Dict, List, Optional, Type
+from typing import Dict, Optional, Type
 from weakref import ref
+
+import anyio
+from anyio.streams.memory import MemoryObjectReceiveStream
 
 from psycopg import errors as e
 from psycopg.pq import TransactionStatus
@@ -21,7 +23,7 @@ from psycopg.connection_async import AsyncConnection
 from .base import ConnectionAttempt, BasePool
 from .sched import AsyncScheduler
 from .errors import PoolClosed, PoolTimeout, TooManyRequests
-from ._compat import Task, asynccontextmanager, create_task, Deque
+from ._compat import asynccontextmanager, Deque
 
 logger = logging.getLogger("psycopg.pool")
 
@@ -50,16 +52,18 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         self._configure = configure
         self._reset = reset
 
-        self._lock = asyncio.Lock()
+        self._lock = anyio.Lock()
         self._waiting = Deque["AsyncClient"]()
 
         # to notify that the pool is full
-        self._pool_full_event: Optional[asyncio.Event] = None
+        self._pool_full_event: Optional[anyio.Event] = None
 
         self._sched = AsyncScheduler()
-        self._sched_runner: Optional[Task[None]] = None
-        self._tasks: "asyncio.Queue[MaintenanceTask]" = asyncio.Queue()
-        self._workers: List[Task[None]] = []
+        self._task_group = anyio.create_task_group()
+        (
+            self._task_sender,
+            self._task_receiver,
+        ) = anyio.create_memory_object_stream()
 
         super().__init__(conninfo, **kwargs)
 
@@ -68,12 +72,12 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
             assert not self._pool_full_event
             if len(self._pool) >= self._nconns:
                 return
-            self._pool_full_event = asyncio.Event()
+            self._pool_full_event = anyio.Event()
 
         logger.info("waiting for pool %r initialization", self.name)
-        try:
-            await asyncio.wait_for(self._pool_full_event.wait(), timeout)
-        except asyncio.TimeoutError:
+        with anyio.move_on_after(timeout) as scope:
+            await self._pool_full_event.wait()
+        if scope.cancel_called:
             await self.close()  # stop all the tasks
             raise PoolTimeout(
                 f"pool initialization incomplete after {timeout} sec"
@@ -209,9 +213,7 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         await self._sched.enter(0, None)
 
         # Stop the worker tasks
-        for w in self._workers:
-            self.run_task(StopWorker(self))
-        self._workers.clear()
+        self._task_sender.close()
 
         # Signal to eventual clients in the queue that business is closed.
         for pos in waiting:
@@ -221,31 +223,23 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         for conn in pool:
             await conn.close()
 
-        # Wait for the worker tasks to terminate
-        assert self._sched_runner is not None
-        wait = asyncio.gather(self._sched_runner, *self._workers)
         if timeout > 0:
-            wait = asyncio.wait_for(asyncio.shield(wait), timeout=timeout)
-        try:
-            await wait
-        except asyncio.TimeoutError:
-            logger.warning(
-                "couldn't stop pool %r tasks within %s seconds",
-                self.name,
-                timeout,
-            )
-        self._sched_runner = None
+            self._task_group.cancel_scope.deadline = timeout
 
     async def __aenter__(self) -> "AsyncConnectionPool":
-        self._sched_runner = create_task(
-            self._sched.run(), name=f"{self.name}-scheduler"
+        await self._task_group.__aenter__()
+        self._task_group.start_soon(
+            self._sched.run, name=f"{self.name}-scheduler"
         )
+
         for i in range(self.num_workers):
-            t = create_task(
-                self.worker(self._tasks),
+            self._task_group.start_soon(
+                self.worker,
+                self._task_receiver.clone(),
                 name=f"{self.name}-worker-{i}",
             )
-            self._workers.append(t)
+
+        await self._task_sender.__aenter__()
 
         # populate the pool with initial min_size connections in background
         for i in range(self._nconns):
@@ -265,6 +259,18 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         exc_tb: Optional[TracebackType],
     ) -> None:
         await self.close()
+
+        await self._task_sender.__aexit__(exc_type, exc_val, exc_tb)
+        await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+
+        cancel_scope = self._task_group.cancel_scope
+        timeout = cancel_scope.deadline
+        if timeout != float("inf") and cancel_scope.cancel_called:
+            logger.warning(
+                "couldn't stop pool %r tasks within %s seconds",
+                self.name,
+                timeout,
+            )
 
     async def resize(
         self, min_size: int, max_size: Optional[int] = None
@@ -316,7 +322,7 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
 
     def run_task(self, task: "MaintenanceTask") -> None:
         """Run a maintenance task in a worker."""
-        self._tasks.put_nowait(task)
+        self._task_sender.send_nowait(task)
 
     async def schedule_task(
         self, task: "MaintenanceTask", delay: float
@@ -325,7 +331,9 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         await self._sched.enter(delay, task.tick)
 
     @classmethod
-    async def worker(cls, q: "asyncio.Queue[MaintenanceTask]") -> None:
+    async def worker(
+        cls, receiver: MemoryObjectReceiveStream["MaintenanceTask"]
+    ) -> None:
         """Runner to execute pending maintenance task.
 
         The function is designed to run as a task.
@@ -333,23 +341,18 @@ class AsyncConnectionPool(BasePool[AsyncConnection[Any]]):
         Block on the queue *q*, run a task received. Finish running if a
         StopWorker is received.
         """
-        while True:
-            task = await q.get()
-
-            if isinstance(task, StopWorker):
-                logger.debug("terminating working task")
-                return
-
-            # Run the task. Make sure don't die in the attempt.
-            try:
-                await task.run()
-            except Exception as ex:
-                logger.warning(
-                    "task run %s failed: %s: %s",
-                    task,
-                    ex.__class__.__name__,
-                    ex,
-                )
+        async with receiver:
+            async for task in receiver:
+                # Run the task. Make sure don't die in the attempt.
+                try:
+                    await task.run()
+                except Exception as ex:
+                    logger.warning(
+                        "task run %s failed: %s: %s",
+                        task,
+                        ex.__class__.__name__,
+                        ex,
+                    )
 
     async def _connect(self) -> AsyncConnection[Any]:
         """Return a new connection configured for the pool."""
@@ -574,7 +577,7 @@ class AsyncClient:
         # message and it hasn't timed out yet, otherwise the pool may give a
         # connection to a client that has already timed out getconn(), which
         # will be lost.
-        self._cond = asyncio.Condition()
+        self._cond = anyio.Condition()
 
     async def wait(self, timeout: float) -> AsyncConnection[Any]:
         """Wait for a connection to be set and return it.
@@ -583,9 +586,9 @@ class AsyncClient:
         """
         async with self._cond:
             if not (self.conn or self.error):
-                try:
-                    await asyncio.wait_for(self._cond.wait(), timeout)
-                except asyncio.TimeoutError:
+                with anyio.move_on_after(timeout) as scope:
+                    await self._cond.wait()
+                if scope.cancel_called:
                     self.error = PoolTimeout(
                         f"couldn't get a connection after {timeout} sec"
                     )
@@ -665,13 +668,6 @@ class MaintenanceTask(ABC):
     @abstractmethod
     async def _run(self, pool: "AsyncConnectionPool") -> None:
         ...
-
-
-class StopWorker(MaintenanceTask):
-    """Signal the maintenance worker to terminate."""
-
-    async def _run(self, pool: "AsyncConnectionPool") -> None:
-        pass
 
 
 class AddConnection(MaintenanceTask):
