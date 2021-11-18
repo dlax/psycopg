@@ -13,13 +13,17 @@ from psycopg import sql
 from psycopg import errors as e
 from psycopg.pq import Format
 from psycopg.copy import AsyncCopy
-from psycopg.copy import AsyncWriter, AsyncLibpqWriter, AsyncQueuedLibpqWriter
+from psycopg.copy import (
+    AsyncWriter,
+    AsyncLibpqWriter,
+    AsyncQueuedLibpqWriter,
+    AnyIOLibpqWriter,
+)
 from psycopg.types import TypeInfo
 from psycopg.adapt import PyFormat
 from psycopg.types.hstore import register_hstore
 from psycopg.types.numeric import Int4
 
-from .conftest import asyncio_options
 from .utils import alist, eur, gc_collect
 from .test_copy import sample_text, sample_binary, sample_binary_rows  # noqa
 from .test_copy import sample_values, sample_records, sample_tabledef
@@ -28,17 +32,6 @@ from .test_copy import py_to_raw, special_chars
 pytestmark = [
     pytest.mark.crdb_skip("copy"),
 ]
-
-
-@pytest.fixture(
-    params=[pytest.param(("asyncio", asyncio_options.copy()), id="asyncio")],
-    scope="session",
-)
-def anyio_backend(request):
-    backend, options = request.param
-    if request.config.option.loop == "uvloop":
-        options["use_uvloop"] = True
-    return backend, options
 
 
 @pytest.mark.parametrize("format", Format)
@@ -640,15 +633,23 @@ async def test_description(aconn):
         assert cur.description[2].name == "column_3"
 
 
+@pytest.fixture
+def writercls(anyio_backend_name):
+    if anyio_backend_name == "asyncio":
+        return AsyncQueuedLibpqWriter
+    else:
+        return AnyIOLibpqWriter
+
+
 @pytest.mark.parametrize(
     "format, buffer", [(Format.TEXT, "sample_text"), (Format.BINARY, "sample_binary")]
 )
-async def test_worker_life(aconn, format, buffer):
+async def test_worker_life(aconn, format, buffer, writercls):
     cur = aconn.cursor()
     await ensure_table(cur, sample_tabledef)
     async with cur.copy(
         f"copy copy_in from stdin (format {format.name})",
-        writer=AsyncQueuedLibpqWriter(cur),
+        writer=writercls(cur),
     ) as copy:
         assert not copy.writer._worker
         await copy.write(globals()[buffer])
@@ -660,7 +661,7 @@ async def test_worker_life(aconn, format, buffer):
     assert data == sample_records
 
 
-async def test_worker_error_propagated(aconn, monkeypatch):
+async def test_worker_error_propagated(aconn, monkeypatch, writercls):
     def copy_to_broken(pgconn, buffer):
         raise ZeroDivisionError
         yield
@@ -669,9 +670,7 @@ async def test_worker_error_propagated(aconn, monkeypatch):
     cur = aconn.cursor()
     await cur.execute("create temp table wat (a text, b text)")
     with pytest.raises(ZeroDivisionError):
-        async with cur.copy(
-            "copy wat from stdin", writer=AsyncQueuedLibpqWriter(cur)
-        ) as copy:
+        async with cur.copy("copy wat from stdin", writer=writercls(cur)) as copy:
             await copy.write("a,b")
 
 

@@ -481,7 +481,7 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
         super().__init__(cursor, binary=binary)
 
         if not writer:
-            writer = AsyncLibpqWriter(cursor)
+            writer = cursor._conn._copywritercls(cursor)
 
         self.writer = writer
         self._write = writer.write
@@ -496,7 +496,7 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        await self.finish(exc_val)
+        await self.finish(exc_type, exc_val, exc_tb)
 
     async def __aiter__(self) -> AsyncIterator[memoryview]:
         while True:
@@ -528,15 +528,20 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
         if data:
             await self._write(data)
 
-    async def finish(self, exc: Optional[BaseException]) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         if self._direction == COPY_IN:
             data = self.formatter.end()
             if data:
                 await self._write(data)
-            await self.writer.finish(exc)
+            await self.writer.finish(exc_type, exc_val, exc_tb)
             self._finished = True
         else:
-            await self.connection.wait(self._end_copy_out_gen(exc))
+            await self.connection.wait(self._end_copy_out_gen(exc_val))
 
 
 class AsyncWriter(ABC):
@@ -548,7 +553,12 @@ class AsyncWriter(ABC):
     async def write(self, data: Buffer) -> None:
         ...
 
-    async def finish(self, exc: Optional[BaseException] = None) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         pass
 
 
@@ -575,10 +585,16 @@ class AsyncLibpqWriter(AsyncWriter):
                     copy_to(self._pgconn, data[i : i + MAX_BUFFER_SIZE])
                 )
 
-    async def finish(self, exc: Optional[BaseException] = None) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         bmsg: Optional[bytes]
-        if exc:
-            msg = f"error from Python: {type(exc).__qualname__} - {exc}"
+        if exc_val:
+            assert exc_type
+            msg = f"error from Python: {exc_type.__qualname__} - {exc_val}"
             bmsg = msg.encode(pgconn_encoding(self._pgconn), "replace")
         else:
             bmsg = None
@@ -629,14 +645,74 @@ class AsyncQueuedLibpqWriter(AsyncLibpqWriter):
             for i in range(0, len(data), MAX_BUFFER_SIZE):
                 await self._queue.put(data[i : i + MAX_BUFFER_SIZE])
 
-    async def finish(self, exc: Optional[BaseException] = None) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         await self._queue.put(b"")
 
         if self._worker:
             await asyncio.gather(self._worker)
             self._worker = None  # break reference loops if any
 
-        await super().finish(exc)
+        await super().finish(exc_type, exc_val, exc_tb)
+
+
+try:
+    import anyio  # type: ignore[import]
+    import anyio.abc  # type: ignore[import]
+except ImportError:
+    pass
+else:
+
+    class AnyIOLibpqWriter(AsyncLibpqWriter):
+        """An `AsyncWriter` using AnyIO streams."""
+
+        __module__ = "psycopg"
+
+        def __init__(self, cursor: "AsyncCursor[Any]"):
+            super().__init__(cursor)
+
+            self._worker: Optional[anyio.abc.TaskGroup] = None
+            (
+                self._send_stream,
+                self._receive_stream,
+            ) = anyio.create_memory_object_stream(
+                max_buffer_size=QUEUE_SIZE, item_type=bytes
+            )
+
+        async def worker(self) -> None:
+            """Push data to the server when available from the receiving stream."""
+            async with self._receive_stream:
+                async for data in self._receive_stream:
+                    await self.connection.wait(copy_to(self._pgconn, data))
+
+        async def write(self, data: bytes) -> None:
+            if not self._worker:
+                self._worker = anyio.create_task_group()
+                await self._worker.__aenter__()
+                self._worker.start_soon(self.worker)
+
+            if not data:
+                return
+
+            await self._send_stream.send(data)
+
+        async def finish(
+            self,
+            exc_type: Optional[Type[BaseException]],
+            exc_val: Optional[BaseException],
+            exc_tb: Optional[TracebackType],
+        ) -> None:
+            self._send_stream.close()
+
+            if self._worker:
+                await self._worker.__aexit__(exc_type, exc_val, exc_tb)
+                self._worker = None  # break reference loops if any
+
+            await super().finish(exc_type, exc_val, exc_tb)
 
 
 class Formatter(ABC):
