@@ -13,7 +13,6 @@ from . import pq
 from . import sql
 from .pq import TransactionStatus
 from .abc import ConnectionType, PQGen
-from .pq.abc import PGresult
 
 if TYPE_CHECKING:
     from typing import Any
@@ -78,7 +77,7 @@ class BaseTransaction(Generic[ConnectionType]):
         sp = f"{self.savepoint_name!r} " if self.savepoint_name else ""
         return f"<{cls} {sp}({status}) {info} at 0x{id(self):x}>"
 
-    def _enter_gen(self) -> PQGen[PGresult]:
+    def _enter_gen(self) -> PQGen[None]:
         if self._entered:
             raise TypeError("transaction blocks can be used only once")
         self._entered = True
@@ -97,20 +96,20 @@ class BaseTransaction(Generic[ConnectionType]):
                     f"_pg3_{len(self._conn._savepoints) + 1}"
                 )
 
-        commands = []
         if self._outer_transaction:
             assert not self._conn._savepoints, self._conn._savepoints
-            commands.append(self._conn._get_tx_start_command())
+            yield from self._conn._exec_command(
+                self._conn._get_tx_start_command()
+            )
 
         if self._savepoint_name:
-            commands.append(
+            yield from self._conn._exec_command(
                 sql.SQL("SAVEPOINT {}")
                 .format(sql.Identifier(self._savepoint_name))
                 .as_bytes(self._conn)
             )
 
         self._conn._savepoints.append(self._savepoint_name)
-        return self._conn._exec_command(b"; ".join(commands))
 
     def _exit_gen(
         self,
@@ -134,14 +133,13 @@ class BaseTransaction(Generic[ConnectionType]):
                 )
                 return False
 
-    def _commit_gen(self) -> PQGen[PGresult]:
+    def _commit_gen(self) -> PQGen[None]:
         assert self._conn._savepoints[-1] == self._savepoint_name
         self._conn._savepoints.pop()
         self._exited = True
 
-        commands = []
         if self._savepoint_name and not self._outer_transaction:
-            commands.append(
+            yield from self._conn._exec_command(
                 sql.SQL("RELEASE {}")
                 .format(sql.Identifier(self._savepoint_name))
                 .as_bytes(self._conn)
@@ -149,9 +147,7 @@ class BaseTransaction(Generic[ConnectionType]):
 
         if self._outer_transaction:
             assert not self._conn._savepoints
-            commands.append(b"COMMIT")
-
-        return self._conn._exec_command(b"; ".join(commands))
+            yield from self._conn._exec_command(b"COMMIT")
 
     def _rollback_gen(self, exc_val: Optional[BaseException]) -> PQGen[bool]:
         if isinstance(exc_val, Rollback):
@@ -162,24 +158,26 @@ class BaseTransaction(Generic[ConnectionType]):
         assert self._conn._savepoints[-1] == self._savepoint_name
         self._conn._savepoints.pop()
 
-        commands = []
         if self._savepoint_name and not self._outer_transaction:
-            commands.append(
-                sql.SQL("ROLLBACK TO {n}; RELEASE {n}")
+            yield from self._conn._exec_command(
+                sql.SQL("ROLLBACK TO {n}")
+                .format(n=sql.Identifier(self._savepoint_name))
+                .as_bytes(self._conn)
+            )
+            yield from self._conn._exec_command(
+                sql.SQL("RELEASE {n}")
                 .format(n=sql.Identifier(self._savepoint_name))
                 .as_bytes(self._conn)
             )
 
         if self._outer_transaction:
             assert not self._conn._savepoints
-            commands.append(b"ROLLBACK")
+            yield from self._conn._exec_command(b"ROLLBACK")
 
         # Also clear the prepared statements cache.
         if self._conn._prepared.clear():
             for cmd in self._conn._prepared.get_maintenance_commands():
-                commands.append(cmd)
-
-        yield from self._conn._exec_command(b"; ".join(commands))
+                yield from self._conn._exec_command(cmd)
 
         if isinstance(exc_val, Rollback):
             if not exc_val.transaction or exc_val.transaction is self:
