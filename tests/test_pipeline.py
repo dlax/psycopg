@@ -187,3 +187,38 @@ def test_transaction_nested(conn):
         assert r == "outer"
         (r,) = inner.fetchone()
         assert r == "inner"
+
+
+def test_outer_transaction(conn):
+    with conn.transaction():
+        with conn.pipeline():
+            conn.execute("drop table if exists outertx")
+            conn.execute("create table outertx as (select 1)")
+            cur = conn.execute("select * from outertx")
+    (r,) = cur.fetchone()
+    assert r == 1
+    cur = conn.execute(
+        "select count(*) from pg_tables where tablename = 'outertx'"
+    )
+    assert cur.fetchone()[0] == 1
+
+
+@pytest.mark.skip("todo: blocks")
+def test_outer_transaction_error(conn):
+    with conn.transaction():
+        with conn.pipeline():
+            conn.execute("select error")
+            conn.execute("create table voila ()")
+        cur = conn.execute(
+            "select count(*) from pg_table where tablename = 'voila'"
+        )
+        (count,) = cur.fetchone()
+    assert count == 0
+
+
+@pytest.mark.skip("todo: blocks")
+def test_outer_transaction_error_no_fetch(conn):
+    with conn.transaction():
+        with conn.pipeline():
+            conn.execute("select error")
+            conn.execute("create table voila ()")

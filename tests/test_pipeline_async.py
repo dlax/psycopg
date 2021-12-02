@@ -191,3 +191,38 @@ async def test_transaction_nested(aconn):
         assert r == "outer"
         (r,) = await inner.fetchone()
         assert r == "inner"
+
+
+async def test_outer_transaction(aconn):
+    async with aconn.transaction():
+        async with aconn.pipeline():
+            await aconn.execute("drop table if exists outertx")
+            await aconn.execute("create table outertx as (select 1)")
+            cur = await aconn.execute("select * from outertx")
+    (r,) = await cur.fetchone()
+    assert r == 1
+    cur = await aconn.execute(
+        "select count(*) from pg_tables where tablename = 'outertx'"
+    )
+    assert (await cur.fetchone())[0] == 1
+
+
+@pytest.mark.skip("todo: blocks")
+async def test_outer_transaction_error(aconn):
+    async with aconn.transaction():
+        async with aconn.pipeline():
+            await aconn.execute("select error")
+            await aconn.execute("create table voila ()")
+        cur = await aconn.execute(
+            "select count(*) from pg_table where tablename = 'voila'"
+        )
+        (count,) = await cur.fetchone()
+    assert count == 0
+
+
+@pytest.mark.skip("todo: blocks")
+async def test_outer_transaction_error_no_fetch(aconn):
+    async with aconn.transaction():
+        async with aconn.pipeline():
+            await aconn.execute("select error")
+            await aconn.execute("create table voila ()")
