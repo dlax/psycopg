@@ -50,6 +50,25 @@ def test_pipeline_processed_at_exit(conn):
         assert cur.fetchone() == (1,)
 
 
+@pytest.mark.xfail
+def test_pipeline_errors_processed_at_exit(conn):
+    """Results are fetched upon pipeline exit, even without an explicit
+    fetch() call. Here we check that an error is raised. Also check that we
+    can issue more query after pipeline exit, thus checking that pipeline
+    really exits in case of error.
+    """
+    conn.autocommit = True
+    with pytest.raises(UndefinedTable):
+        with conn.pipeline():
+            conn.execute("select * from nosuchtable")
+            conn.execute("create table voila ()")
+    cur = conn.execute(
+        "select count(*) from pg_tables where name = %s", ("voila",)
+    )
+    (count,) = cur.fetchone()
+    assert count == 0
+
+
 def test_pipeline(conn):
     with conn.pipeline() as pipeline:
         c1 = conn.cursor()

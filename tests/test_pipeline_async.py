@@ -53,6 +53,25 @@ async def test_pipeline_processed_at_exit(aconn):
         assert await cur.fetchone() == (1,)
 
 
+@pytest.mark.xfail
+async def test_pipeline_errors_processed_at_exit(aconn):
+    """Results are fetched upon pipeline exit, even without an explicit
+    fetch() call. Here we check that an error is raised. Also check that we
+    can issue more query after pipeline exit, thus checking that pipeline
+    really exits in case of error.
+    """
+    await aconn.set_autocommit(True)
+    with pytest.raises(UndefinedTable):
+        async with aconn.pipeline():
+            await aconn.execute("select * from nosuchtable")
+            await aconn.execute("create table voila ()")
+    cur = await aconn.execute(
+        "select count(*) from pg_tables where name = %s", ("voila",)
+    )
+    (count,) = await cur.fetchone()
+    assert count == 0
+
+
 async def test_pipeline(aconn):
     async with aconn.pipeline() as pipeline:
         c1 = aconn.cursor()
