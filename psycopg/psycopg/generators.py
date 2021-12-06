@@ -160,17 +160,13 @@ def pipeline_communicate(
 
     We wait for the connection socket to be read-ready or write-ready.
     If read-ready, the server output buffer will be consumed completely until
-    no more results are available. Then, if write-ready, the client buffer
-    will be flushed the function returns.
-
-    When the client buffer got flushed but the socket is not read-ready,
-    meaning we cannot get results from the server, this will return no
-    results. In that case, the caller should issue pgconn.send_flush_request()
-    or pgconn.pipeline_sync() and retry, or wait for the server to flush its
-    output buffer.
+    no more results are available. Then, if write-ready, 'commands' are sent
+    and flushed. When there are no more commands to send (or flush), the
+    function returns.
     """
     results = []
 
+    flushed = pgconn.flush() == 0
     while True:
         ready = yield Wait.RW
 
@@ -202,11 +198,13 @@ def pipeline_communicate(
                 else:
                     res.append(r)
 
-        if ready & Ready.W:
-            pgconn.flush()
-            if not commands:
-                break
-            commands.popleft()()
+        if ready & Ready.W and commands:
+            if flushed:
+                commands.popleft()()
+            flushed = pgconn.flush() == 0
+
+        if not commands and flushed:
+            break
 
     return results
 

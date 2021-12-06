@@ -191,14 +191,9 @@ def pipeline_communicate(pq.PGconn pgconn, commands: Deque[Command]) -> PQGen[Li
 
     We wait for the connection socket to be read-ready or write-ready.
     If read-ready, the server output buffer will be consumed completely until
-    no more results are available. Then, if write-ready, the client buffer
-    will be flushed the function returns.
-
-    When the client buffer got flushed but the socket is not read-ready,
-    meaning we cannot get results from the server, this will return no
-    results. In that case, the caller should issue pgconn.send_flush_request()
-    or pgconn.pipeline_sync() and retry, or wait for the server to flush its
-    output buffer.
+    no more results are available. Then, if write-ready, 'commands' are sent
+    and flushed. When there are no more commands to send (or flush), the
+    function returns.
     """
     cdef libpq.PGconn *pgconn_ptr = pgconn._pgconn_ptr
     cdef object notify_handler = pgconn.notify_handler
@@ -209,6 +204,7 @@ def pipeline_communicate(pq.PGconn pgconn, commands: Deque[Command]) -> PQGen[Li
     cdef list results = []
     cdef pq.PGresult r
 
+    flushed = libpq.PQflush(pgconn_ptr) == 0
     while True:
         ready = yield WAIT_RW
 
@@ -257,10 +253,12 @@ def pipeline_communicate(pq.PGconn pgconn, commands: Deque[Command]) -> PQGen[Li
                     else:
                         res.append(r)
 
-        if ready & Ready.W:
-            libpq.PQflush(pgconn_ptr)
-            if not commands:
-                break
-            commands.popleft()()
+        if ready & Ready.W and commands:
+            if flushed:
+                commands.popleft()()
+            flushed = libpq.PQflush(pgconn_ptr) == 0
+
+        if not commands and flushed:
+            break
 
     return results
