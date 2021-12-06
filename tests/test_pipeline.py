@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 import psycopg
@@ -5,6 +7,13 @@ from psycopg import pq
 from psycopg.errors import UndefinedColumn, UndefinedTable
 
 pytestmark = pytest.mark.libpq(">= 14")
+
+
+@pytest.fixture(autouse=True)
+def configure_logging():
+    logger = logging.getLogger("psycopg")
+    logger.addHandler(logging.StreamHandler())
+    logger.setLevel(logging.INFO)
 
 
 def test_pipeline_status(conn):

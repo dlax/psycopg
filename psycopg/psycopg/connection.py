@@ -114,6 +114,10 @@ class BasePipeline:
         results, which are then processed.
         """
         assert self.command_queue
+        logger.info(
+            "sending commands to pipeline: %s",
+            ", ".join(map(str, self.command_queue)),
+        )
         fetched = yield from pipeline_communicate(
             self.pgconn, self.command_queue
         )
@@ -138,6 +142,7 @@ class BasePipeline:
 
         fetched = []
         while self.result_queue:
+            logger.info("fetching...")
             results = yield from fetch_many(self.pgconn)
             if not results:
                 # No more results to fetch, but there may still be pending
@@ -161,6 +166,7 @@ class BasePipeline:
         """
         if queued is None:
             (result,) = results
+            logger.info("processing command result: %s", result)
             if result.status == ExecStatus.FATAL_ERROR:
                 raise e.error_from_result(
                     result, encoding=pgconn_encoding(self.pgconn)
@@ -169,6 +175,11 @@ class BasePipeline:
                 raise e.OperationalError("pipeline aborted")
         else:
             cursor, prepinfo = queued
+            logger.info(
+                "processing results for %s: %s",
+                cursor,
+                ", ".join(pq.ExecStatus(r.status).name for r in results),
+            )
             cursor._execute_results(results)
             if prepinfo:
                 key, prep, name = prepinfo
@@ -561,6 +572,7 @@ class BaseConnection(Generic[Row]):
                 )
             self._pipeline.command_queue.append(cmd)
             self._pipeline.result_queue.append(None)
+            logger.info("queued %s in pipeline", command.decode())
             return None
 
         if result_format == Format.TEXT:
