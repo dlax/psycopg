@@ -172,7 +172,6 @@ def pipeline_communicate(
     """
     results = []
 
-    flushed = pgconn.flush() == 0
     while True:
         ready = yield Wait.RW
 
@@ -205,11 +204,10 @@ def pipeline_communicate(
                     res.append(r)
 
         if ready & Ready.W and commands:
-            if flushed:
-                commands.popleft()()
-            flushed = pgconn.flush() == 0
+            commands.popleft()()
+            pgconn.flush()
 
-        if not commands and flushed:
+        if not commands and results:
             break
 
     return results
