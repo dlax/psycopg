@@ -496,7 +496,7 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        await self.finish(exc_val)
+        await self.finish(exc_type, exc_val, exc_tb)
 
     async def __aiter__(self) -> AsyncIterator[Buffer]:
         while True:
@@ -528,15 +528,20 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
         if data:
             await self._write(data)
 
-    async def finish(self, exc: Optional[BaseException]) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         if self._direction == COPY_IN:
             data = self.formatter.end()
             if data:
                 await self._write(data)
-            await self.writer.finish(exc)
+            await self.writer.finish(exc_type, exc_val, exc_tb)
             self._finished = True
         else:
-            await self.connection.wait(self._end_copy_out_gen(exc))
+            await self.connection.wait(self._end_copy_out_gen(exc_val))
 
 
 class AsyncWriter(ABC):
@@ -548,7 +553,12 @@ class AsyncWriter(ABC):
     async def write(self, data: Buffer) -> None:
         ...
 
-    async def finish(self, exc: Optional[BaseException] = None) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         pass
 
 
@@ -575,10 +585,16 @@ class AsyncLibpqWriter(AsyncWriter):
                     copy_to(self._pgconn, data[i : i + MAX_BUFFER_SIZE])
                 )
 
-    async def finish(self, exc: Optional[BaseException] = None) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         bmsg: Optional[bytes]
-        if exc:
-            msg = f"error from Python: {type(exc).__qualname__} - {exc}"
+        if exc_val:
+            assert exc_type
+            msg = f"error from Python: {exc_type.__qualname__} - {exc_val}"
             bmsg = msg.encode(pgconn_encoding(self._pgconn), "replace")
         else:
             bmsg = None
@@ -629,14 +645,19 @@ class AsyncQueuedLibpqWriter(AsyncLibpqWriter):
             for i in range(0, len(data), MAX_BUFFER_SIZE):
                 await self._queue.put(data[i : i + MAX_BUFFER_SIZE])
 
-    async def finish(self, exc: Optional[BaseException] = None) -> None:
+    async def finish(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         await self._queue.put(b"")
 
         if self._worker:
             await asyncio.gather(self._worker)
             self._worker = None  # break reference loops if any
 
-        await super().finish(exc)
+        await super().finish(exc_type, exc_val, exc_tb)
 
 
 class Formatter(ABC):
