@@ -13,7 +13,12 @@ import select
 import selectors
 from enum import IntEnum
 from typing import Optional
-from asyncio import get_event_loop, wait_for, Event, TimeoutError
+from asyncio import (
+    get_event_loop,
+    wait_for,
+    Event,
+    TimeoutError as AsyncIOTimeoutError,
+)
 from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
 
 from . import errors as e
@@ -198,7 +203,7 @@ async def wait_conn_asyncio(gen: PQGenConn[RV], timeout: Optional[float] = None)
                     loop.remove_writer(fileno)
             fileno, s = gen.send(ready)
 
-    except TimeoutError:
+    except AsyncIOTimeoutError:
         raise e.ConnectionTimeout("connection timeout expired")
 
     except StopIteration as ex:
