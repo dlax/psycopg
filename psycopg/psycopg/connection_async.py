@@ -21,7 +21,7 @@ from .rows import Row, AsyncRowFactory, tuple_row, TupleRow, args_row
 from .adapt import AdaptersMap
 from ._enums import IsolationLevel
 from .conninfo import make_conninfo, conninfo_to_dict
-from ._pipeline import AsyncPipeline
+from ._pipeline import AsyncPipeline, AsyncNullPipeline
 from ._encodings import pgconn_encoding
 from .connection import BaseConnection, CursorRow, Notify
 from .generators import notifies
@@ -282,7 +282,11 @@ class AsyncConnection(BaseConnection[Row]):
         :rtype: AsyncTransaction
         """
         tx = AsyncTransaction(self, savepoint_name, force_rollback)
-        async with tx:
+        pipeline_factory = (
+            self.pipeline if AsyncPipeline.is_supported() else AsyncNullPipeline
+        )
+        async with pipeline_factory() as pipeline, tx:
+            await pipeline.sync()
             yield tx
 
     async def notifies(self) -> AsyncGenerator[Notify, None]:

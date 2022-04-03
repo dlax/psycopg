@@ -31,7 +31,7 @@ from .cursor import Cursor
 from ._compat import TypeAlias
 from ._cmodule import _psycopg
 from .conninfo import make_conninfo, conninfo_to_dict, ConnectionInfo
-from ._pipeline import BasePipeline, Pipeline
+from ._pipeline import BasePipeline, NullPipeline, Pipeline
 from .generators import notifies
 from ._encodings import pgconn_encoding
 from ._preparing import PrepareManager
@@ -852,7 +852,10 @@ class Connection(BaseConnection[Row]):
             block even if there were no error (e.g. to try a no-op process).
         :rtype: Transaction
         """
-        with Transaction(self, savepoint_name, force_rollback) as tx:
+        tx = Transaction(self, savepoint_name, force_rollback)
+        pipeline_factory = self.pipeline if Pipeline.is_supported() else NullPipeline
+        with pipeline_factory() as pipeline, tx:
+            pipeline.sync()
             yield tx
 
     def notifies(self) -> Generator[Notify, None, None]:

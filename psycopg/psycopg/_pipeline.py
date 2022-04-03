@@ -232,6 +232,29 @@ class Pipeline(BasePipeline):
         self.__enter__()
 
 
+class NullPipeline(Pipeline):
+    def __init__(self) -> None:
+        pass
+
+    def sync(self) -> None:
+        pass
+
+    def __enter__(self) -> "NullPipeline":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        pass
+
+    @contextmanager
+    def pause(self) -> Iterator[None]:
+        yield None
+
+
 class AsyncPipeline(BasePipeline):
     """Handler for async connection in pipeline mode."""
 
@@ -285,3 +308,26 @@ class AsyncPipeline(BasePipeline):
         await self.__aexit__(None, None, None)
         yield None
         await self.__aenter__()
+
+
+class AsyncNullPipeline(AsyncPipeline):
+    def __init__(self) -> None:
+        pass
+
+    async def sync(self) -> None:
+        pass
+
+    async def __aenter__(self) -> "AsyncNullPipeline":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        pass
+
+    @asynccontextmanager
+    async def pause(self) -> AsyncIterator[None]:
+        yield None
