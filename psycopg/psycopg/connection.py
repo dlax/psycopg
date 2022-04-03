@@ -28,7 +28,7 @@ from .rows import Row, RowFactory, tuple_row, TupleRow, args_row
 from .adapt import AdaptersMap
 from ._enums import IsolationLevel
 from .cursor import Cursor
-from ._compat import TypeAlias
+from ._compat import AbstractContextManager, TypeAlias
 from ._cmodule import _psycopg
 from .conninfo import make_conninfo, conninfo_to_dict, ConnectionInfo
 from ._pipeline import BasePipeline, NullPipeline, Pipeline
@@ -618,13 +618,21 @@ class Connection(BaseConnection[Row]):
     row_factory: RowFactory[Row]
 
     _pipeline: Optional[Pipeline]
+    _pipeline_cm: Optional[AbstractContextManager[Pipeline]]
 
-    def __init__(self, pgconn: "PGconn", row_factory: Optional[RowFactory[Row]] = None):
+    def __init__(
+        self,
+        pgconn: "PGconn",
+        row_factory: Optional[RowFactory[Row]] = None,
+        pipeline: bool = Pipeline.is_supported(),
+    ):
         super().__init__(pgconn)
         self.row_factory = row_factory or cast(RowFactory[Row], tuple_row)
         self.lock = threading.Lock()
         self.cursor_factory = Cursor
         self.server_cursor_factory = ServerCursor
+        self._pipeline_enabled = pipeline
+        self._pipeline_cm = None
 
     @overload
     @classmethod
@@ -636,6 +644,7 @@ class Connection(BaseConnection[Row]):
         row_factory: RowFactory[Row],
         prepare_threshold: Optional[int] = 5,
         context: Optional[AdaptContext] = None,
+        pipeline: bool = Pipeline.is_supported(),
         **kwargs: Union[None, int, str],
     ) -> "Connection[Row]":
         ...
@@ -649,6 +658,7 @@ class Connection(BaseConnection[Row]):
         autocommit: bool = False,
         prepare_threshold: Optional[int] = 5,
         context: Optional[AdaptContext] = None,
+        pipeline: bool = Pipeline.is_supported(),
         **kwargs: Union[None, int, str],
     ) -> "Connection[TupleRow]":
         ...
@@ -662,6 +672,7 @@ class Connection(BaseConnection[Row]):
         prepare_threshold: Optional[int] = 5,
         row_factory: Optional[RowFactory[Row]] = None,
         context: Optional[AdaptContext] = None,
+        pipeline: bool = Pipeline.is_supported(),
         **kwargs: Any,
     ) -> "Connection[Any]":
         """
@@ -683,9 +694,14 @@ class Connection(BaseConnection[Row]):
         if context:
             rv._adapters = AdaptersMap(context.adapters)
         rv.prepare_threshold = prepare_threshold
+        rv._pipeline_enabled = pipeline
         return rv
 
     def __enter__(self) -> "Connection[Row]":
+        if self._pipeline_enabled:
+            assert self._pipeline_cm is None
+            self._pipeline_cm = self.pipeline()
+            self._pipeline_cm.__enter__()
         return self
 
     def __exit__(
@@ -711,9 +727,14 @@ class Connection(BaseConnection[Row]):
         else:
             self.commit()
 
-        # Close the connection only if it doesn't belong to a pool.
-        if not getattr(self, "_pool", None):
-            self.close()
+        try:
+            if self._pipeline_cm:
+                self._pipeline_cm.__exit__(exc_type, exc_val, exc_tb)
+                self._pipeline_cm = None
+        finally:
+            # Close the connection only if it doesn't belong to a pool.
+            if not getattr(self, "_pool", None):
+                self.close()
 
     @classmethod
     def _get_connection_params(cls, conninfo: str, **kwargs: Any) -> Dict[str, Any]:

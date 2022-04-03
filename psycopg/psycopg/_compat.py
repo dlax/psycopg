@@ -30,7 +30,12 @@ else:
 if sys.version_info >= (3, 9):
     from zoneinfo import ZoneInfo
     from collections import Counter, deque as Deque
+    from typing import (
+        ContextManager as AbstractContextManager,
+        AsyncContextManager as AbstractAsyncContextManager,
+    )
 else:
+    from contextlib import AbstractContextManager, AbstractAsyncContextManager
     from backports.zoneinfo import ZoneInfo
     from typing import Counter, Deque
 
@@ -40,6 +45,8 @@ else:
     from typing_extensions import TypeAlias, TypeGuard
 
 __all__ = [
+    "AbstractContextManager",
+    "AbstractAsyncContextManager",
     "Counter",
     "Deque",
     "Protocol",

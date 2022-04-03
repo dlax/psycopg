@@ -11,7 +11,7 @@ else:
     from typing_extensions import TypedDict
 
 import psycopg
-from psycopg import Connection, Notify
+from psycopg import Connection, Notify, Pipeline
 from psycopg.rows import tuple_row
 from psycopg.errors import UndefinedTable
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -149,9 +149,9 @@ def test_context_rollback(conn, dsn):
     assert conn.closed
     assert not conn.broken
 
-    with psycopg.connect(dsn) as conn:
-        with conn.cursor() as cur:
-            with pytest.raises(UndefinedTable):
+    with pytest.raises(UndefinedTable):
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
                 cur.execute("select * from textctx")
 
 
@@ -165,7 +165,7 @@ def test_context_inerror_rollback_no_clobber(conn, dsn, caplog):
     caplog.set_level(logging.WARNING, logger="psycopg")
 
     with pytest.raises(ZeroDivisionError):
-        with psycopg.connect(dsn) as conn2:
+        with psycopg.connect(dsn, pipeline=False) as conn2:
             conn2.execute("select 1")
             conn.execute(
                 "select pg_terminate_backend(%s::int)",
@@ -178,12 +178,29 @@ def test_context_inerror_rollback_no_clobber(conn, dsn, caplog):
     assert rec.levelno == logging.WARNING
     assert "in rollback" in rec.message
 
+    caplog.clear()
+    if Pipeline.is_supported():
+        with pytest.raises(ZeroDivisionError):
+            with psycopg.connect(dsn) as conn2:
+                conn2.execute("select 1")
+                conn.execute(
+                    "select pg_terminate_backend(%s::int)",
+                    [conn2.pgconn.backend_pid],
+                )
+                1 / 0
+
+        assert len(caplog.records) == 1
+        rec = caplog.records[0]
+        assert rec.levelno == logging.WARNING
+        assert "error ignored syncing" in rec.message
+        assert "consuming input failed" in rec.message
+
 
 def test_context_active_rollback_no_clobber(dsn, caplog):
     caplog.set_level(logging.WARNING, logger="psycopg")
 
     with pytest.raises(ZeroDivisionError):
-        with psycopg.connect(dsn) as conn:
+        with psycopg.connect(dsn, pipeline=False) as conn:
             conn.pgconn.exec_(b"copy (select generate_series(1, 10)) to stdout")
             status = conn.info.transaction_status
             assert status == conn.TransactionStatus.ACTIVE

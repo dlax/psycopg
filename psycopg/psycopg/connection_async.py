@@ -19,6 +19,7 @@ from .abc import AdaptContext, Params, PQGen, PQGenConn, Query, RV
 from ._tpc import Xid
 from .rows import Row, AsyncRowFactory, tuple_row, TupleRow, args_row
 from .adapt import AdaptersMap
+from ._compat import AbstractAsyncContextManager
 from ._enums import IsolationLevel
 from .conninfo import make_conninfo, conninfo_to_dict
 from ._pipeline import AsyncPipeline, AsyncNullPipeline
@@ -46,18 +47,23 @@ class AsyncConnection(BaseConnection[Row]):
     cursor_factory: Type[AsyncCursor[Row]]
     server_cursor_factory: Type[AsyncServerCursor[Row]]
     row_factory: AsyncRowFactory[Row]
+
     _pipeline: Optional[AsyncPipeline]
+    _pipeline_cm: Optional[AbstractAsyncContextManager[AsyncPipeline]]
 
     def __init__(
         self,
         pgconn: "PGconn",
         row_factory: Optional[AsyncRowFactory[Row]] = None,
+        pipeline: bool = AsyncPipeline.is_supported(),
     ):
         super().__init__(pgconn)
         self.row_factory = row_factory or cast(AsyncRowFactory[Row], tuple_row)
         self.lock = asyncio.Lock()
         self.cursor_factory = AsyncCursor
         self.server_cursor_factory = AsyncServerCursor
+        self._pipeline_enabled = pipeline
+        self._pipeline_cm = None
 
     @overload
     @classmethod
@@ -69,6 +75,7 @@ class AsyncConnection(BaseConnection[Row]):
         prepare_threshold: Optional[int] = 5,
         row_factory: AsyncRowFactory[Row],
         context: Optional[AdaptContext] = None,
+        pipeline: bool = AsyncPipeline.is_supported(),
         **kwargs: Union[None, int, str],
     ) -> "AsyncConnection[Row]":
         ...
@@ -82,6 +89,7 @@ class AsyncConnection(BaseConnection[Row]):
         autocommit: bool = False,
         prepare_threshold: Optional[int] = 5,
         context: Optional[AdaptContext] = None,
+        pipeline: bool = AsyncPipeline.is_supported(),
         **kwargs: Union[None, int, str],
     ) -> "AsyncConnection[TupleRow]":
         ...
@@ -95,6 +103,7 @@ class AsyncConnection(BaseConnection[Row]):
         prepare_threshold: Optional[int] = 5,
         context: Optional[AdaptContext] = None,
         row_factory: Optional[AsyncRowFactory[Row]] = None,
+        pipeline: bool = AsyncPipeline.is_supported(),
         **kwargs: Any,
     ) -> "AsyncConnection[Any]":
 
@@ -124,9 +133,14 @@ class AsyncConnection(BaseConnection[Row]):
         if context:
             rv._adapters = AdaptersMap(context.adapters)
         rv.prepare_threshold = prepare_threshold
+        rv._pipeline_enabled = pipeline
         return rv
 
     async def __aenter__(self) -> "AsyncConnection[Row]":
+        if self._pipeline_enabled:
+            assert self._pipeline_cm is None
+            self._pipeline_cm = self.pipeline()
+            await self._pipeline_cm.__aenter__()
         return self
 
     async def __aexit__(
@@ -152,9 +166,14 @@ class AsyncConnection(BaseConnection[Row]):
         else:
             await self.commit()
 
-        # Close the connection only if it doesn't belong to a pool.
-        if not getattr(self, "_pool", None):
-            await self.close()
+        try:
+            if self._pipeline_cm:
+                await self._pipeline_cm.__aexit__(exc_type, exc_val, exc_tb)
+                self._pipeline_cm = None
+        finally:
+            # Close the connection only if it doesn't belong to a pool.
+            if not getattr(self, "_pool", None):
+                await self.close()
 
     @classmethod
     async def _get_connection_params(

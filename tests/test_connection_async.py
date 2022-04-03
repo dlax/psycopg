@@ -4,7 +4,7 @@ import logging
 import weakref
 
 import psycopg
-from psycopg import AsyncConnection, Notify
+from psycopg import AsyncConnection, Notify, Pipeline
 from psycopg.rows import tuple_row
 from psycopg.errors import UndefinedTable
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -150,9 +150,9 @@ async def test_context_rollback(aconn, dsn):
     assert aconn.closed
     assert not aconn.broken
 
-    async with await psycopg.AsyncConnection.connect(dsn) as aconn:
-        async with aconn.cursor() as cur:
-            with pytest.raises(UndefinedTable):
+    with pytest.raises(UndefinedTable):
+        async with await psycopg.AsyncConnection.connect(dsn) as aconn:
+            async with aconn.cursor() as cur:
                 await cur.execute("select * from textctx")
 
 
@@ -164,7 +164,7 @@ async def test_context_close(aconn):
 
 async def test_context_inerror_rollback_no_clobber(conn, dsn, caplog):
     with pytest.raises(ZeroDivisionError):
-        async with await psycopg.AsyncConnection.connect(dsn) as conn2:
+        async with await psycopg.AsyncConnection.connect(dsn, pipeline=False) as conn2:
             await conn2.execute("select 1")
             conn.execute(
                 "select pg_terminate_backend(%s::int)",
@@ -177,12 +177,29 @@ async def test_context_inerror_rollback_no_clobber(conn, dsn, caplog):
     assert rec.levelno == logging.WARNING
     assert "in rollback" in rec.message
 
+    caplog.clear()
+    if Pipeline.is_supported():
+        with pytest.raises(ZeroDivisionError):
+            async with await psycopg.AsyncConnection.connect(dsn) as conn2:
+                await conn2.execute("select 1")
+                conn.execute(
+                    "select pg_terminate_backend(%s::int)",
+                    [conn2.pgconn.backend_pid],
+                )
+                1 / 0
+
+        assert len(caplog.records) == 1
+        rec = caplog.records[0]
+        assert rec.levelno == logging.WARNING
+        assert "error ignored syncing" in rec.message
+        assert "consuming input failed" in rec.message
+
 
 async def test_context_active_rollback_no_clobber(dsn, caplog):
     caplog.set_level(logging.WARNING, logger="psycopg")
 
     with pytest.raises(ZeroDivisionError):
-        async with await psycopg.AsyncConnection.connect(dsn) as conn:
+        async with await psycopg.AsyncConnection.connect(dsn, pipeline=False) as conn:
             conn.pgconn.exec_(b"copy (select generate_series(1, 10)) to stdout")
             status = conn.info.transaction_status
             assert status == conn.TransactionStatus.ACTIVE
