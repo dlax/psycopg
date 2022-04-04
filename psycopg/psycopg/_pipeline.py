@@ -5,8 +5,19 @@ commands pipeline management
 # Copyright (C) 2021 The Psycopg Team
 
 import logging
+from contextlib import asynccontextmanager, contextmanager
 from types import TracebackType
-from typing import Any, List, Optional, Union, Tuple, Type, TYPE_CHECKING
+from typing import (
+    AsyncIterator,
+    Any,
+    Iterator,
+    List,
+    Optional,
+    Union,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+)
 
 from . import pq
 from . import errors as e
@@ -212,6 +223,14 @@ class Pipeline(BasePipeline):
                 else:
                     raise
 
+    @contextmanager
+    def pause(self) -> Iterator[None]:
+        if self.level > 1:
+            raise e.OperationalError("cannot pause a nested pipeline")
+        self.__exit__(None, None, None)
+        yield None
+        self.__enter__()
+
 
 class AsyncPipeline(BasePipeline):
     """Handler for async connection in pipeline mode."""
@@ -258,3 +277,11 @@ class AsyncPipeline(BasePipeline):
                     logger.warning("error ignored exiting %r: %s", self, exc2)
                 else:
                     raise
+
+    @asynccontextmanager
+    async def pause(self) -> AsyncIterator[None]:
+        if self.level > 1:
+            raise e.OperationalError("cannot pause a nested pipeline")
+        await self.__aexit__(None, None, None)
+        yield None
+        await self.__aenter__()

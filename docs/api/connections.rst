@@ -267,7 +267,7 @@ The `!Connection` class
     .. automethod:: fileno
 
     .. automethod:: pipeline
-
+    .. automethod:: pause_pipeline
 
     .. _tpc-methods:
 
@@ -456,6 +456,14 @@ The `!AsyncConnection` class
             It must be called as::
 
                 async with conn.pipeline():
+
+    .. automethod:: pause_pipeline
+
+        .. note::
+
+            It must be called as::
+
+                async with conn.pause_pipeline():
                     ...
 
     .. automethod:: tpc_prepare

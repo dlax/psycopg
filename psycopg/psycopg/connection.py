@@ -885,6 +885,23 @@ class Connection(BaseConnection[Row]):
                     assert pipeline is self._pipeline
                     self._pipeline = None
 
+    @contextmanager
+    def pause_pipeline(self) -> Iterator[None]:
+        """Pause connection's pipeline.
+
+        No-op if not in pipeline mode.
+        """
+        pipeline = self._pipeline
+        if pipeline is None:
+            yield None
+            return
+        with pipeline.pause():
+            with self.lock:
+                self._pipeline = None
+            yield None
+            with self.lock:
+                self._pipeline = pipeline
+
     def wait(self, gen: PQGen[RV], timeout: Optional[float] = 0.1) -> RV:
         """
         Consume a generator operating on the connection.

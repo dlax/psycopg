@@ -90,6 +90,27 @@ def test_pipeline_nested_sync_trace(conn, trace):
     assert len([i for i in t if i.type == "Sync"]) == 2
 
 
+def test_pause_pipeline(conn):
+    assert not conn._pipeline
+    with conn.pause_pipeline():
+        assert not conn._pipeline
+    assert not conn._pipeline
+
+    with conn.pipeline() as p:
+        assert conn._pipeline is p
+        assert p.status == pq.PipelineStatus.ON
+        assert p.level == 1
+        with conn.pause_pipeline():
+            assert p.status == pq.PipelineStatus.OFF
+        assert conn._pipeline is p
+        assert p.status == pq.PipelineStatus.ON
+
+        with conn.pipeline():
+            with pytest.raises(e.OperationalError, match="nested pipeline"):
+                with conn.pause_pipeline():
+                    pass
+
+
 def test_cursor_stream(conn):
     with conn.pipeline(), conn.cursor() as cur:
         with pytest.raises(psycopg.ProgrammingError):
@@ -115,6 +136,21 @@ def test_copy(conn):
         with pytest.raises(e.NotSupportedError):
             with cur.copy("copy (select 1) to stdout"):
                 pass
+
+
+@pytest.fixture
+def pipeline_conn(conn):
+    with conn.pipeline():
+        yield conn
+
+
+def test_copy_pause(pipeline_conn):
+    conn = pipeline_conn
+    cur = conn.cursor()
+    with conn.pause_pipeline(), cur.copy("copy (select 1) to stdout") as copy:
+        r = copy.read_row()
+        assert copy.read_row() is None
+    assert r[0] == "1"
 
 
 def test_pipeline_processed_at_exit(conn):

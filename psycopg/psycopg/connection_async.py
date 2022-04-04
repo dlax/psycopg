@@ -312,6 +312,23 @@ class AsyncConnection(BaseConnection[Row]):
                     assert pipeline is self._pipeline
                     self._pipeline = None
 
+    @asynccontextmanager
+    async def pause_pipeline(self) -> AsyncIterator[None]:
+        """Pause connection's pipeline.
+
+        No-op if not in pipeline mode.
+        """
+        pipeline = self._pipeline
+        if pipeline is None:
+            yield None
+            return
+        async with pipeline.pause():
+            async with self.lock:
+                self._pipeline = None
+            yield None
+            async with self.lock:
+                self._pipeline = pipeline
+
     async def wait(self, gen: PQGen[RV]) -> RV:
         try:
             return await waiting.wait_async(gen, self.pgconn.socket)

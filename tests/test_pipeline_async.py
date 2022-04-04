@@ -93,6 +93,27 @@ async def test_pipeline_nested_sync_trace(aconn, trace):
     assert len([i for i in t if i.type == "Sync"]) == 2
 
 
+async def test_pause_pipeline(aconn):
+    assert not aconn._pipeline
+    async with aconn.pause_pipeline():
+        assert not aconn._pipeline
+    assert not aconn._pipeline
+
+    async with aconn.pipeline() as p:
+        assert aconn._pipeline is p
+        assert p.status == pq.PipelineStatus.ON
+        assert p.level == 1
+        async with aconn.pause_pipeline():
+            assert p.status == pq.PipelineStatus.OFF
+        assert aconn._pipeline is p
+        assert p.status == pq.PipelineStatus.ON
+
+        async with aconn.pipeline():
+            with pytest.raises(e.OperationalError, match="nested pipeline"):
+                async with aconn.pause_pipeline():
+                    pass
+
+
 async def test_cursor_stream(aconn):
     async with aconn.pipeline(), aconn.cursor() as cur:
         with pytest.raises(psycopg.ProgrammingError):
@@ -118,6 +139,21 @@ async def test_copy(aconn):
         with pytest.raises(e.NotSupportedError):
             async with cur.copy("copy (select 1) to stdout") as copy:
                 await copy.read()
+
+
+@pytest.fixture
+async def pipeline_aconn(aconn):
+    async with aconn.pipeline():
+        yield aconn
+
+
+async def test_copy_pause(pipeline_aconn):
+    aconn = pipeline_aconn
+    cur = aconn.cursor()
+    async with aconn.pause_pipeline(), cur.copy("copy (select 1) to stdout") as copy:
+        r = await copy.read_row()
+        assert (await copy.read_row()) is None
+    assert r[0] == "1"
 
 
 async def test_pipeline_processed_at_exit(aconn):
