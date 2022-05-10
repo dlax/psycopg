@@ -25,6 +25,12 @@ def pytest_addoption(parser):
         default=None,
         help="Generate a libpq trace to TRACEFILE.",
     )
+    parser.addoption(
+        "--pipeline",
+        action="store_true",
+        default=False,
+        help="Use pipeline mode on connection fixture.",
+    )
 
 
 def pytest_report_header(config):
@@ -154,13 +160,17 @@ def conn(dsn, request, tracefile):
         conn.close()
         pytest.skip(msg)
     with maybe_trace(conn.pgconn, tracefile, request.function):
-        yield conn
+        if request.config.option.pipeline:
+            with conn.pipeline():
+                yield conn
+        else:
+            yield conn
     conn.close()
 
 
 @pytest.fixture(params=[True, False], ids=["pipeline=on", "pipeline=off"])
 def pipeline(request, conn):
-    if request.param:
+    if not request.config.option.pipeline and request.param:
         msg = check_libpq_version(pq.version(), ">= 14")
         if msg:
             pytest.skip(msg)
@@ -182,13 +192,17 @@ async def aconn(dsn, request, tracefile):
         await conn.close()
         pytest.skip(msg)
     with maybe_trace(conn.pgconn, tracefile, request.function):
-        yield conn
+        if request.config.option.pipeline:
+            async with conn.pipeline():
+                yield conn
+        else:
+            yield conn
     await conn.close()
 
 
 @pytest.fixture(params=[True, False], ids=["pipeline=on", "pipeline=off"])
 async def apipeline(request, aconn):
-    if request.param:
+    if not request.config.option.pipeline and request.param:
         msg = check_libpq_version(pq.version(), ">= 14")
         if msg:
             pytest.skip(msg)
