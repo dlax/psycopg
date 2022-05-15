@@ -19,6 +19,7 @@ from .abc import ConnectionType, Query, Params, PQGen
 from .copy import Copy
 from .rows import Row, RowMaker, RowFactory
 from ._column import Column
+from ._compat import Protocol
 from ._cmodule import _psycopg
 from ._queries import PostgresQuery, PostgresClientQuery
 from ._pipeline import Pipeline
@@ -45,7 +46,7 @@ else:
 _C = TypeVar("_C", bound="Cursor[Any]")
 
 
-class BaseCursor(Generic[ConnectionType, Row]):
+class BaseCursor(Protocol, Generic[ConnectionType, Row]):
     __slots__ = """
         _conn format _adapters arraysize _closed _results pgresult _pos
         _iresult _rowcount _query _tx _last_query _row_factory _make_row
@@ -53,11 +54,28 @@ class BaseCursor(Generic[ConnectionType, Row]):
         __weakref__
         """.split()
 
-    ExecStatus = pq.ExecStatus
+    ExecStatus: Type[pq.ExecStatus] = pq.ExecStatus
 
+    _adapters: adapt.AdaptersMap
+    _closed: bool
+    _conn: ConnectionType
+    _encoding: str
+    _execmany_returning: Optional[
+        # None if executemany() not executing, True/False according to returning state
+        bool
+    ] = None
+    _iresult: int
+    _last_query: Optional[Query] = None
+    _pos: int
+    _results: List["PGresult"]
     _tx: "Transformer"
     _make_row: RowMaker[Row]
     _pgconn: "PGconn"
+    _query: Optional[PostgresQuery] = None
+    _rowcount: int
+    arraysize: int
+    format: Format
+    pgresult: Optional["PGresult"] = None
 
     def __init__(self, connection: ConnectionType):
         self._conn = connection
@@ -66,19 +84,17 @@ class BaseCursor(Generic[ConnectionType, Row]):
         self._adapters = adapt.AdaptersMap(connection.adapters)
         self.arraysize = 1
         self._closed = False
-        self._last_query: Optional[Query] = None
+        self._last_query = None
         self._reset()
 
     def _reset(self, reset_query: bool = True) -> None:
         self._results: List["PGresult"] = []
-        self.pgresult: Optional["PGresult"] = None
+        self.pgresult = None
         self._pos = 0
         self._iresult = 0
         self._rowcount = -1
-        self._query: Optional[PostgresQuery]
         self._encoding = "utf-8"
-        # None if executemany() not executing, True/False according to returning state
-        self._execmany_returning: Optional[bool] = None
+        self._execmany_returning = None
         if reset_query:
             self._query = None
 
@@ -170,6 +186,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
 
         `!None` if the cursor doesn't have a result available.
         """
+        assert self.pgresult is not None
         msg = self.pgresult.command_status if self.pgresult else None
         return msg.decode() if msg else None
 
@@ -475,12 +492,12 @@ class BaseCursor(Generic[ConnectionType, Row]):
         pgq.convert(query, params)
         return pgq
 
-    _status_ok = (
+    _status_ok: Tuple[pq.ExecStatus, pq.ExecStatus, pq.ExecStatus] = (
         ExecStatus.TUPLES_OK,
         ExecStatus.COMMAND_OK,
         ExecStatus.EMPTY_QUERY,
     )
-    _status_copy = (
+    _status_copy: Tuple[pq.ExecStatus, pq.ExecStatus, pq.ExecStatus] = (
         ExecStatus.COPY_IN,
         ExecStatus.COPY_OUT,
         ExecStatus.COPY_BOTH,
@@ -531,6 +548,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
 
         self._make_row = self._make_row_maker()
         self._pos = 0
+        assert self.pgresult is not None
         nrows = self.pgresult.command_tuples
         self._rowcount = nrows if nrows is not None else -1
 

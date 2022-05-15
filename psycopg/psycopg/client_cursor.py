@@ -24,8 +24,12 @@ if TYPE_CHECKING:
     from .connection_async import AsyncConnection  # noqa: F401
 
 
-class ClientCursorMixin(BaseCursor[ConnectionType, Row]):
-    def mogrify(self, query: Query, params: Optional[Params] = None) -> str:
+class ClientCursorMixin:
+    def mogrify(
+        self: BaseCursor[ConnectionType, Row],
+        query: Query,
+        params: Optional[Params] = None,
+    ) -> str:
         """
         Return the query and parameters merged.
 
@@ -38,7 +42,7 @@ class ClientCursorMixin(BaseCursor[ConnectionType, Row]):
         return pgq.query.decode(self._tx.encoding)
 
     def _execute_send(
-        self,
+        self: BaseCursor[ConnectionType, Row],
         query: PostgresQuery,
         *,
         no_pqexec: bool = False,
@@ -73,23 +77,25 @@ class ClientCursorMixin(BaseCursor[ConnectionType, Row]):
                 self._pgconn.send_query(query.query)
 
     def _convert_query(
-        self, query: Query, params: Optional[Params] = None
+        self: BaseCursor[ConnectionType, Row],
+        query: Query,
+        params: Optional[Params] = None,
     ) -> PostgresQuery:
         pgq = PostgresClientQuery(self._tx)
         pgq.convert(query, params)
         return pgq
 
     def _get_prepared(
-        self, pgq: PostgresQuery, prepare: Optional[bool] = None
+        self: BaseCursor[ConnectionType, Row],
+        pgq: PostgresQuery,
+        prepare: Optional[bool] = None,
     ) -> Tuple[Prepare, bytes]:
         return (Prepare.NO, b"")
 
 
-class ClientCursor(ClientCursorMixin["Connection[Any]", Row], Cursor[Row]):
+class ClientCursor(ClientCursorMixin, Cursor[Row]):
     __module__ = "psycopg"
 
 
-class AsyncClientCursor(
-    ClientCursorMixin["AsyncConnection[Any]", Row], AsyncCursor[Row]
-):
+class AsyncClientCursor(ClientCursorMixin, AsyncCursor[Row]):
     __module__ = "psycopg"
