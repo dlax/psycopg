@@ -26,7 +26,6 @@ def test_fetch(conn, name, status):
     assert info.regtype == "text"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["text", sql.Identifier("text")])
 @pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
 async def test_fetch_async(aconn, name, status):
@@ -57,7 +56,6 @@ def test_fetch_not_found(conn, name, status):
     assert info is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
 @pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
 async def test_fetch_not_found_async(aconn, name, status):

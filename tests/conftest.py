@@ -1,6 +1,6 @@
 import sys
 import asyncio
-from typing import List
+from typing import Any, Dict, List
 
 import pytest
 
@@ -65,18 +65,20 @@ def pytest_report_header(config):
     return [f"asyncio loop: {loop}"]
 
 
-def pytest_sessionstart(session):
-    # Configure the async loop.
-    loop = session.config.getoption("--loop")
-    if loop == "uvloop":
-        import uvloop
+asyncio_options: Dict[str, Any] = {}
+if sys.platform == "win32" and sys.version_info >= (3, 8):
+    asyncio_options["policy"] = asyncio.WindowsSelectorEventLoopPolicy()
 
-        uvloop.install()
-    else:
-        assert loop == "default"
 
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+@pytest.fixture(
+    params=[pytest.param(("asyncio", asyncio_options.copy()), id="asyncio")],
+    scope="session",
+)
+def anyio_backend(request):
+    backend, options = request.param
+    if request.config.option.loop == "uvloop":
+        options["use_uvloop"] = True
+    return backend, options
 
 
 allow_fail_messages: List[str] = []
