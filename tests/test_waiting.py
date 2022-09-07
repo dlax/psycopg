@@ -6,6 +6,7 @@ import pytest
 
 import psycopg
 from psycopg import waiting
+from psycopg._anyio import waiting as waiting_anyio
 from psycopg import generators
 from psycopg.pq import ConnStatus, ExecStatus
 
@@ -108,7 +109,7 @@ def test_wait_epoll_bad(pgconn):
 def wait_async(anyio_backend_name):
     return {
         "asyncio": waiting.wait_asyncio,
-        "trio": waiting.wait_anyio,
+        "trio": waiting_anyio.wait,
     }[anyio_backend_name]
 
 
@@ -116,7 +117,7 @@ def wait_async(anyio_backend_name):
 def wait_conn_async(anyio_backend_name):
     return {
         "asyncio": waiting.wait_conn_asyncio,
-        "trio": waiting.wait_conn_anyio,
+        "trio": waiting_anyio.wait_conn,
     }[anyio_backend_name]
 
 

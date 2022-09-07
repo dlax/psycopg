@@ -17,8 +17,8 @@ from psycopg.copy import (
     AsyncWriter,
     AsyncLibpqWriter,
     AsyncQueuedLibpqWriter,
-    AnyIOLibpqWriter,
 )
+from psycopg._anyio.copy import AnyIOLibpqWriter
 from psycopg.types import TypeInfo
 from psycopg.adapt import PyFormat
 from psycopg.types.hstore import register_hstore
@@ -666,7 +666,11 @@ async def test_worker_error_propagated(aconn, monkeypatch, writercls):
         raise ZeroDivisionError
         yield
 
-    monkeypatch.setattr(psycopg.copy, "copy_to", copy_to_broken)
+    copymod = {
+        AsyncQueuedLibpqWriter: psycopg.copy,
+        AnyIOLibpqWriter: psycopg._anyio.copy,
+    }[writercls]
+    monkeypatch.setattr(copymod, "copy_to", copy_to_broken)
     cur = aconn.cursor()
     await cur.execute("create temp table wat (a text, b text)")
     with pytest.raises(ZeroDivisionError):

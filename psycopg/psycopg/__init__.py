@@ -24,7 +24,8 @@ from .transaction import Rollback, Transaction, AsyncTransaction
 from .cursor_async import AsyncCursor
 from .server_cursor import AsyncServerCursor, ServerCursor
 from .client_cursor import AsyncClientCursor, ClientCursor
-from .connection_async import AsyncConnection, AnyIOConnection
+from .connection_async import AsyncConnection
+from ._anyio.connection import AnyIOConnection
 
 from . import dbapi20
 from .dbapi20 import BINARY, DATETIME, NUMBER, ROWID, STRING
