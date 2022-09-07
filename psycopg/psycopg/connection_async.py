@@ -24,14 +24,20 @@ from .conninfo import make_conninfo, conninfo_to_dict, resolve_hostaddr_async
 from ._pipeline import AsyncPipeline
 from ._encodings import pgconn_encoding
 from .connection import BaseConnection, CursorRow, Notify
-from .copy import AsyncLibpqWriter
+from .copy import AsyncLibpqWriter, AnyIOLibpqWriter
 from .generators import notifies
 from .transaction import AsyncTransaction
 from .cursor_async import AsyncCursor
 from .server_cursor import AsyncServerCursor
 
 if TYPE_CHECKING:
+    import anyio
+    import sniffio
+
     from .pq.abc import PGconn
+else:
+    anyio = None
+    sniffio = None
 
 TEXT = pq.Format.TEXT
 BINARY = pq.Format.BINARY
@@ -448,52 +454,60 @@ class AsyncConnection(BaseConnection[Row]):
         return res
 
 
-try:
-    import anyio  # type: ignore[import]
-except ImportError:
-    pass
-else:
-    import sniffio
+def _import_anyio() -> None:
+    global anyio, sniffio
+    try:
+        import anyio
+        import sniffio
+    except ImportError as e:
+        raise ImportError(
+            "anyio is not installed; run `pip install psycopg[anyio]`"
+        ) from e
 
-    from .copy import AnyIOLibpqWriter
 
-    class AnyIOConnection(AsyncConnection[Row]):
-        """
-        Asynchronous wrapper for a connection to the database using AnyIO
-        asynchronous library.
-        """
+class AnyIOConnection(AsyncConnection[Row]):
+    """
+    Asynchronous wrapper for a connection to the database using AnyIO
+    asynchronous library.
+    """
 
-        __module__ = "psycopg"
+    __module__ = "psycopg"
 
-        _lockcls = anyio.Lock  # type: ignore[assignment]
-        _copywritercls = AnyIOLibpqWriter
+    _copywritercls = AnyIOLibpqWriter
 
-        @staticmethod
-        def _async_library() -> str:
-            return sniffio.current_async_library()
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        _import_anyio()
+        self._lockcls = anyio.Lock  # type: ignore[assignment]
+        super().__init__(*args, **kwargs)
 
-        @staticmethod
-        def _getaddrinfo() -> Any:
-            return anyio.getaddrinfo
+    @staticmethod
+    def _async_library() -> str:
+        _import_anyio()
+        return sniffio.current_async_library()
 
-        async def wait(self, gen: PQGen[RV]) -> RV:
+    @staticmethod
+    def _getaddrinfo() -> Any:
+        _import_anyio()
+        return anyio.getaddrinfo
+
+    async def wait(self, gen: PQGen[RV]) -> RV:
+        try:
+            return await waiting.wait_anyio(gen, self.pgconn.socket)
+        except KeyboardInterrupt:
+            # TODO: this doesn't seem to work as it does for sync connections
+            # see tests/test_concurrency_async.py::test_ctrl_c
+            # In the test, the code doesn't reach this branch.
+
+            # On Ctrl-C, try to cancel the query in the server, otherwise
+            # otherwise the connection will be stuck in ACTIVE state
+            c = self.pgconn.get_cancel()
+            c.cancel()
             try:
-                return await waiting.wait_anyio(gen, self.pgconn.socket)
-            except KeyboardInterrupt:
-                # TODO: this doesn't seem to work as it does for sync connections
-                # see tests/test_concurrency_async.py::test_ctrl_c
-                # In the test, the code doesn't reach this branch.
+                await waiting.wait_anyio(gen, self.pgconn.socket)
+            except e.QueryCanceled:
+                pass  # as expected
+            raise
 
-                # On Ctrl-C, try to cancel the query in the server, otherwise
-                # otherwise the connection will be stuck in ACTIVE state
-                c = self.pgconn.get_cancel()
-                c.cancel()
-                try:
-                    await waiting.wait_anyio(gen, self.pgconn.socket)
-                except e.QueryCanceled:
-                    pass  # as expected
-                raise
-
-        @classmethod
-        async def _wait_conn(cls, gen: PQGenConn[RV], timeout: Optional[int]) -> RV:
-            return await waiting.wait_conn_anyio(gen, timeout)
+    @classmethod
+    async def _wait_conn(cls, gen: PQGenConn[RV], timeout: Optional[int]) -> RV:
+        return await waiting.wait_conn_anyio(gen, timeout)

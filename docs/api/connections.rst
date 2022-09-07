@@ -494,4 +494,7 @@ The `!AsyncConnection` classes
     This is class is similar to `AsyncConnection` but uses anyio_ as an
     asynchronous library instead of `asyncio`.
 
+    To use this class, run ``pip install "psycopg[anyio]"`` to install
+    required dependencies.
+
 .. _anyio: https://anyio.readthedocs.io/

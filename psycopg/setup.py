@@ -31,6 +31,11 @@ extras_require = {
     "binary": [
         f"psycopg-binary == {version}",
     ],
+    # Requirements to use AnyIO and Trio async library.
+    "anyio": [
+        "anyio",
+        "sniffio",
+    ],
     # Install the connection pool
     "pool": [
         "psycopg-pool",
