@@ -481,7 +481,7 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
         super().__init__(cursor, binary=binary)
 
         if not writer:
-            writer = cursor._conn._copywritercls(cursor)
+            writer = AsyncLibpqWriter(cursor)
 
         self.writer = writer
         self._write = writer.write

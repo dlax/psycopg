@@ -12,7 +12,6 @@ from .. import errors as e
 from ..abc import PQGen, PQGenConn, RV
 from ..connection_async import AsyncConnection
 from ..rows import Row
-from .copy import AnyIOLibpqWriter
 
 if TYPE_CHECKING:
     import anyio
@@ -42,8 +41,6 @@ class AnyIOConnection(AsyncConnection[Row]):
     """
 
     __module__ = "psycopg"
-
-    _copywritercls = AnyIOLibpqWriter
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         _import_anyio()

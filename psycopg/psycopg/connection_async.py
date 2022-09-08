@@ -24,7 +24,6 @@ from .conninfo import make_conninfo, conninfo_to_dict, resolve_hostaddr_async
 from ._pipeline import AsyncPipeline
 from ._encodings import pgconn_encoding
 from .connection import BaseConnection, CursorRow, Notify
-from .copy import AsyncLibpqWriter
 from .generators import notifies
 from .transaction import AsyncTransaction
 from .cursor_async import AsyncCursor
@@ -55,7 +54,6 @@ class AsyncConnection(BaseConnection[Row]):
     _pipeline: Optional[AsyncPipeline]
     _Self = TypeVar("_Self", bound="AsyncConnection[Row]")
     _lockcls = asyncio.Lock
-    _copywritercls = AsyncLibpqWriter
 
     def __init__(
         self,
