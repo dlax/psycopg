@@ -512,7 +512,7 @@ async def test_message_0x33(aconn):
     assert not notices
 
 
-async def test_concurrency(aconn, anyio_backend_name):
+async def test_concurrency(aconn, use_anyio):
     async with aconn.transaction():
         await aconn.execute("drop table if exists pipeline_concurrency")
         await aconn.execute("drop table if exists accessed")
@@ -542,7 +542,7 @@ async def test_concurrency(aconn, anyio_backend_name):
     values = range(1, 10)
     timeout = len(values)
     async with aconn.pipeline():
-        if anyio_backend_name == "asyncio":
+        if not use_anyio:
             await asyncio.wait_for(
                 asyncio.gather(*[update(value) for value in values]),
                 timeout=timeout,

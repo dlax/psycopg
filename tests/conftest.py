@@ -34,6 +34,15 @@ def pytest_configure(config):
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--anyio",
+        choices=["asyncio", "trio"],
+        help=(
+            "Use AnyIO implementation of the async API, run tests with "
+            "specified backend. If unset, use plain asyncio implementation, "
+            "and run with asyncio backend."
+        ),
+    )
+    parser.addoption(
         "--loop",
         choices=["default", "uvloop"],
         default="default",
@@ -58,11 +67,18 @@ def pytest_addoption(parser):
 
 
 def pytest_report_header(config):
+    h = []
+    backend = config.getoption("--anyio")
+    if backend:
+        h.append(f"AnyIO backend: {backend}")
     loop = config.getoption("--loop")
-    if loop == "default":
-        return []
-
-    return [f"asyncio loop: {loop}"]
+    if loop != "default":
+        if backend not in (None, "asyncio"):
+            raise pytest.UsageError(
+                f"--loop={loop} is incompatible with --anyio={backend}"
+            )
+        h.append(f"asyncio loop: {loop}")
+    return h
 
 
 asyncio_options: Dict[str, Any] = {}
@@ -70,18 +86,16 @@ if sys.platform == "win32" and sys.version_info >= (3, 8):
     asyncio_options["policy"] = asyncio.WindowsSelectorEventLoopPolicy()
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(("asyncio", asyncio_options.copy()), id="asyncio"),
-        pytest.param(("trio", {}), id="trio"),
-    ],
-    scope="session",
-)
-def anyio_backend(request):
-    backend, options = request.param
-    if request.config.option.loop == "uvloop":
-        options["use_uvloop"] = True
-    return backend, options
+@pytest.fixture(scope="session")
+def anyio_backend(pytestconfig):
+    opt = pytestconfig.getoption("--anyio")
+    if opt in (None, "asyncio"):
+        options = asyncio_options.copy()
+        if pytestconfig.option.loop == "uvloop":
+            options["use_uvloop"] = True
+        return "asyncio", options
+    elif opt == "trio":
+        return "trio", {}
 
 
 @pytest.fixture(scope="session")
@@ -91,6 +105,12 @@ def anyio_backend_name(anyio_backend):
         return anyio_backend
     else:
         return anyio_backend[0]
+
+
+@pytest.fixture(scope="session")
+def use_anyio(pytestconfig, anyio_backend):
+    """True if AnyIO-based implementations of Psycopg API should be used."""
+    return pytestconfig.option.anyio is not None
 
 
 allow_fail_messages: List[str] = []

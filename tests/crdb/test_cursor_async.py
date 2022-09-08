@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.crdb, pytest.mark.anyio]
 
 @pytest.mark.slow
 @pytest.mark.parametrize("fmt_out", pq.Format)
-async def test_changefeed(aconn_cls, dsn, aconn, testfeed, fmt_out, anyio_backend_name):
+async def test_changefeed(aconn_cls, dsn, aconn, testfeed, fmt_out, use_anyio):
     await aconn.set_autocommit(True)
 
     async def worker(enqueue):
@@ -40,7 +40,7 @@ async def test_changefeed(aconn_cls, dsn, aconn, testfeed, fmt_out, anyio_backen
         except Exception as ex:
             enqueue(ex)
 
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         q: "Queue[Any]" = Queue()  # infinite queue
         t = create_task(worker(q.put_nowait))
         cur = aconn.cursor()

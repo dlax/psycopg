@@ -15,7 +15,7 @@ from psycopg._compat import create_task
 
 
 @pytest.mark.slow
-async def test_commit_concurrency(aconn, anyio_backend_name):
+async def test_commit_concurrency(aconn, use_anyio):
     # Check the condition reported in psycopg2#103
     # Because of bad status check, we commit even when a commit is already on
     # its way. We can detect this condition by the warnings.
@@ -37,7 +37,7 @@ async def test_commit_concurrency(aconn, anyio_backend_name):
         # Stop the committer thread
         stop = True
 
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         notices = Queue()  # type: ignore[var-annotated]
         aconn.add_notice_handler(lambda diag: notices.put_nowait(diag.message_primary))
         await asyncio.gather(committer(asyncio.sleep), runner())
@@ -58,7 +58,7 @@ async def test_commit_concurrency(aconn, anyio_backend_name):
 
 
 @pytest.mark.slow
-async def test_concurrent_execution(aconn_cls, dsn, anyio_backend_name):
+async def test_concurrent_execution(aconn_cls, dsn, use_anyio):
     async def worker():
         cnn = await aconn_cls.connect(dsn)
         cur = cnn.cursor()
@@ -67,7 +67,7 @@ async def test_concurrent_execution(aconn_cls, dsn, anyio_backend_name):
         await cnn.close()
 
     t0 = time.time()
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         workers = [worker(), worker()]
         await asyncio.gather(*workers)
     else:
@@ -80,7 +80,7 @@ async def test_concurrent_execution(aconn_cls, dsn, anyio_backend_name):
 @pytest.mark.slow
 @pytest.mark.timing
 @pytest.mark.crdb_skip("notify")
-async def test_notifies(aconn_cls, aconn, dsn, anyio_backend_name):
+async def test_notifies(aconn_cls, aconn, dsn, use_anyio):
     nconn = await aconn_cls.connect(dsn, autocommit=True)
     npid = nconn.pgconn.backend_pid
 
@@ -104,7 +104,7 @@ async def test_notifies(aconn_cls, aconn, dsn, anyio_backend_name):
 
     ns: List[Tuple[psycopg.Notify, float]] = []
     t0 = time.time()
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         workers = [notifier(asyncio.sleep), receiver()]
         await asyncio.gather(*workers)
     else:
@@ -136,7 +136,7 @@ async def canceller(aconn, errors, sleepfn):
 
 @pytest.mark.slow
 @pytest.mark.crdb_skip("cancel")
-async def test_cancel(aconn, anyio_backend_name):
+async def test_cancel(aconn, use_anyio):
     async def worker():
         cur = aconn.cursor()
         with pytest.raises(e.QueryCanceled):
@@ -144,7 +144,7 @@ async def test_cancel(aconn, anyio_backend_name):
 
     errors: List[Exception] = []
     t0 = time.time()
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         workers = [worker(), canceller(aconn, errors, asyncio.sleep)]
         await asyncio.gather(*workers)
     else:
@@ -165,7 +165,7 @@ async def test_cancel(aconn, anyio_backend_name):
 
 @pytest.mark.slow
 @pytest.mark.crdb_skip("cancel")
-async def test_cancel_stream(aconn, anyio_backend_name):
+async def test_cancel_stream(aconn, use_anyio):
     async def worker():
         cur = aconn.cursor()
         with pytest.raises(e.QueryCanceled):
@@ -174,7 +174,7 @@ async def test_cancel_stream(aconn, anyio_backend_name):
 
     errors: List[Exception] = []
     t0 = time.time()
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         workers = [worker(), canceller(aconn, errors, asyncio.sleep)]
         await asyncio.gather(*workers)
     else:
@@ -195,7 +195,7 @@ async def test_cancel_stream(aconn, anyio_backend_name):
 
 @pytest.mark.slow
 @pytest.mark.crdb_skip("pg_terminate_backend")
-async def test_identify_closure(aconn_cls, dsn, anyio_backend_name):
+async def test_identify_closure(aconn_cls, dsn, use_anyio):
     async def closer(sleepfn):
         await sleepfn(0.2)
         await conn2.execute(
@@ -205,7 +205,7 @@ async def test_identify_closure(aconn_cls, dsn, anyio_backend_name):
     aconn = await aconn_cls.connect(dsn)
     conn2 = await aconn_cls.connect(dsn)
     try:
-        if anyio_backend_name == "asyncio":
+        if not use_anyio:
             t = create_task(closer(asyncio.sleep))
             t0 = time.time()
             try:
@@ -234,8 +234,8 @@ async def test_identify_closure(aconn_cls, dsn, anyio_backend_name):
     sys.platform == "win32", reason="don't know how to Ctrl-C on Windows"
 )
 @pytest.mark.crdb_skip("cancel")
-def test_ctrl_c(dsn, anyio_backend_name):
-    if anyio_backend_name == "asyncio":
+def test_ctrl_c(dsn, use_anyio):
+    if not use_anyio:
         script = f"""\
 import signal
 import asyncio

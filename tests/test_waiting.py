@@ -106,19 +106,13 @@ def test_wait_epoll_bad(pgconn):
 
 
 @pytest.fixture
-def wait_async(anyio_backend_name):
-    return {
-        "asyncio": waiting.wait_asyncio,
-        "trio": waiting_anyio.wait,
-    }[anyio_backend_name]
+def wait_async(use_anyio):
+    return waiting_anyio.wait if use_anyio else waiting.wait_asyncio
 
 
 @pytest.fixture
-def wait_conn_async(anyio_backend_name):
-    return {
-        "asyncio": waiting.wait_conn_asyncio,
-        "trio": waiting_anyio.wait_conn,
-    }[anyio_backend_name]
+def wait_conn_async(use_anyio):
+    return waiting_anyio.wait_conn if use_anyio else waiting.wait_conn_asyncio
 
 
 @pytest.mark.parametrize("timeout", timeouts)

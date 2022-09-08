@@ -62,7 +62,7 @@ async def test_broken(aconn):
 
 
 @pytest.mark.slow
-async def test_identify_closure(aconn_cls, dsn, anyio_backend_name):
+async def test_identify_closure(aconn_cls, dsn, use_anyio):
     async with await aconn_cls.connect(dsn) as conn:
         async with await aconn_cls.connect(dsn) as conn2:
             cur = await conn.execute("show session_id")
@@ -72,7 +72,7 @@ async def test_identify_closure(aconn_cls, dsn, anyio_backend_name):
                 await sleepfn(0.2)
                 await conn2.execute("cancel session %s", [session_id])
 
-            if anyio_backend_name == "asyncio":
+            if not use_anyio:
                 t = create_task(closer(asyncio.sleep))
                 t0 = time.time()
                 try:

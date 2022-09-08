@@ -701,10 +701,10 @@ async def test_out_of_order_exit_same_name(aconn, exit_error):
 
 
 @pytest.mark.parametrize("what", ["commit", "rollback", "error"])
-async def test_concurrency(aconn, what, anyio_backend_name):
+async def test_concurrency(aconn, what, use_anyio):
     await aconn.set_autocommit(True)
 
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         evs = [asyncio.Event() for i in range(3)]
     else:
         evs = [anyio.Event() for i in range(3)]  # type: ignore[misc]
@@ -732,7 +732,7 @@ async def test_concurrency(aconn, what, anyio_backend_name):
         else:
             assert "transaction commit" in str(ex.value)
 
-    if anyio_backend_name == "asyncio":
+    if not use_anyio:
         # Start a first transaction in a task
         t1 = create_task(worker(unlock=evs[0], wait_on=evs[1]))
         await evs[0].wait()

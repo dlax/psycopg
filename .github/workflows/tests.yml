@@ -25,22 +25,22 @@ jobs:
       matrix:
         include:
           # Test different combinations of Python, Postgres, libpq.
-          - {impl: python, python: "3.7", postgres: "postgres:10", libpq: "newest"}
-          - {impl: python, python: "3.8", postgres: "postgres:12", libpq: ""}
-          - {impl: python, python: "3.9", postgres: "postgres:13", libpq: "newest"}
-          - {impl: python, python: "3.10", postgres: "postgres:14", libpq: "oldest"}
-          - {impl: c, python: "3.7", postgres: "postgres:14", libpq: "oldest"}
-          - {impl: c, python: "3.8", postgres: "postgres:13", libpq: "newest"}
-          - {impl: c, python: "3.9", postgres: "postgres:12", libpq: ""}
-          - {impl: c, python: "3.10", postgres: "postgres:10", libpq: "oldest"}
-          - {impl: dns, python: "3.9", postgres: "postgres:14", libpq: ""}
-          - {impl: postgis, python: "3.9", postgres: "postgis/postgis", libpq: ""}
+          - {impl: python, python: "3.7", postgres: "postgres:10", libpq: "newest", pytest_opts: "--anyio=asyncio"}
+          - {impl: python, python: "3.8", postgres: "postgres:12", libpq: "", pytest_opts: ""}
+          - {impl: python, python: "3.9", postgres: "postgres:13", libpq: "newest", pytest_opts: "--anyio=trio"}
+          - {impl: python, python: "3.10", postgres: "postgres:14", libpq: "oldest", pytest_opts: ""}
+          - {impl: c, python: "3.7", postgres: "postgres:14", libpq: "oldest", pytest_opts: ""}
+          - {impl: c, python: "3.8", postgres: "postgres:13", libpq: "newest", pytest_opts: "--anyio=asyncio"}
+          - {impl: c, python: "3.9", postgres: "postgres:12", libpq: "", pytest_opts: ""}
+          - {impl: c, python: "3.10", postgres: "postgres:10", libpq: "oldest", pytest_opts: "--anyio=trio"}
+          - {impl: dns, python: "3.9", postgres: "postgres:14", libpq: "", pytest_opts: ""}
+          - {impl: postgis, python: "3.9", postgres: "postgis/postgis", libpq: "", pytest_opts: ""}
 
     env:
       PSYCOPG_IMPL: ${{ matrix.impl }}
       PSYCOPG_TEST_DSN: "host=127.0.0.1 user=postgres"
       PGPASSWORD: password
-      PYTEST_ADDOPTS: --color yes
+      PYTEST_ADDOPTS: --color yes ${{ matrix.pytest_opts }}
       # Enable to run tests using the minimum version of dependencies.
       # PIP_CONSTRAINT: ${{ github.workspace }}/tests/constraints.txt
 
@@ -121,14 +121,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {impl: python, python: "3.7"}
-          - {impl: python, python: "3.8"}
-          - {impl: python, python: "3.9"}
-          - {impl: python, python: "3.10"}
-          - {impl: c, python: "3.7"}
-          - {impl: c, python: "3.8"}
-          - {impl: c, python: "3.9"}
-          - {impl: c, python: "3.10"}
+          - {impl: python, python: "3.7", pytest_opts: ""}
+          - {impl: python, python: "3.8", pytest_opts: "--anyio=asyncio"}
+          - {impl: python, python: "3.9", pytest_opts: ""}
+          - {impl: python, python: "3.10", pytest_opts: "--anyio=trio"}
+          - {impl: c, python: "3.7", pytest_opts: "--anyio=trio"}
+          - {impl: c, python: "3.8", pytest_opts: ""}
+          - {impl: c, python: "3.9", pytest_opts: "--anyio=asyncio"}
+          - {impl: c, python: "3.10", pytest_opts: ""}
 
     env:
       PSYCOPG_IMPL: ${{ matrix.impl }}
@@ -136,7 +136,7 @@ jobs:
       # MacOS on GitHub Actions seems particularly slow.
       # Don't run timing-based tests as they regularly fail.
       # pproxy-based tests fail too, with the proxy not coming up in 2s.
-      PYTEST_ADDOPTS: -m 'not timing and not proxy and not mypy' --color yes
+      PYTEST_ADDOPTS: -m 'not timing and not proxy and not mypy' --color yes ${{ matrix.pytest_opts }}
       # PIP_CONSTRAINT: ${{ github.workspace }}/tests/constraints.txt
 
     steps:
@@ -173,20 +173,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {impl: python, python: "3.7"}
-          - {impl: python, python: "3.8"}
-          - {impl: python, python: "3.9"}
-          - {impl: python, python: "3.10"}
-          - {impl: c, python: "3.7"}
-          - {impl: c, python: "3.8"}
-          - {impl: c, python: "3.9"}
-          - {impl: c, python: "3.10"}
+          - {impl: python, python: "3.7", pytest_opts: "--anyio=asyncio"}
+          - {impl: python, python: "3.8", pytest_opts: ""}
+          - {impl: python, python: "3.9", pytest_opts: "--anyio=trio"}
+          - {impl: python, python: "3.10", pytest_opts: ""}
+          - {impl: c, python: "3.7", pytest_opts: ""}
+          - {impl: c, python: "3.8", pytest_opts: "--anyio=trio"}
+          - {impl: c, python: "3.9", pytest_opts: ""}
+          - {impl: c, python: "3.10", pytest_opts: "--anyio=asyncio"}
 
     env:
       PSYCOPG_IMPL: ${{ matrix.impl }}
       PSYCOPG_TEST_DSN: "host=127.0.0.1 dbname=postgres"
       # On windows pproxy doesn't seem very happy. Also a few timing test fail.
-      PYTEST_ADDOPTS: -m 'not timing and not proxy and not mypy' --color yes
+      PYTEST_ADDOPTS: -m 'not timing and not proxy and not mypy' --color yes ${{ matrix.pytest_opts }}
       # PIP_CONSTRAINT: ${{ github.workspace }}/tests/constraints.txt
 
     steps:
@@ -247,13 +247,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {crdb: "latest-v22.1", python: "3.10", impl: "c", libpq: "newest"}
-          - {crdb: "latest-v21.2", python: "3.9", impl: "python", libpq: ""}
+          - {crdb: "latest-v22.1", python: "3.10", impl: "c", libpq: "newest", pytest_opts: "--anyio=trio"}
+          - {crdb: "latest-v21.2", python: "3.9", impl: "python", libpq: "", pytest_opts: ""}
 
     env:
       PSYCOPG_IMPL: ${{ matrix.impl }}
       PSYCOPG_TEST_DSN: "host=127.0.0.1 port=26257 user=root dbname=defaultdb"
-      PYTEST_ADDOPTS: --color yes
+      PYTEST_ADDOPTS: --color yes ${{ matrix.pytest_opts }}
 
     steps:
       - uses: actions/checkout@v2

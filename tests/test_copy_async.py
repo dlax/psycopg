@@ -634,11 +634,8 @@ async def test_description(aconn):
 
 
 @pytest.fixture
-def writercls(anyio_backend_name):
-    if anyio_backend_name == "asyncio":
-        return AsyncQueuedLibpqWriter
-    else:
-        return AnyIOLibpqWriter
+def writercls(use_anyio):
+    return AnyIOLibpqWriter if use_anyio else AsyncQueuedLibpqWriter
 
 
 @pytest.mark.parametrize(
