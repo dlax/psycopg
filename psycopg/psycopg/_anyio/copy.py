@@ -5,6 +5,7 @@ psycopg copy support using AnyIO
 # Copyright (C) 2022 The Psycopg Team
 
 
+from functools import lru_cache
 from types import TracebackType
 from typing import Any, Optional, Type, TYPE_CHECKING
 
@@ -18,6 +19,7 @@ else:
     anyio = None
 
 
+@lru_cache()
 def _import_anyio() -> None:
     global anyio
     try:

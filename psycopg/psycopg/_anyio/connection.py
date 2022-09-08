@@ -5,6 +5,7 @@ psycopg async connection objects using AnyIO
 # Copyright (C) 2022 The Psycopg Team
 
 
+from functools import lru_cache
 from typing import Any, Optional, TYPE_CHECKING
 
 from .. import errors as e
@@ -21,6 +22,7 @@ else:
     anyio = sniffio = waiting = None
 
 
+@lru_cache()
 def _import_anyio() -> None:
     global anyio, sniffio, waiting
     try:
