@@ -36,10 +36,11 @@ def pytest_addoption(parser):
     parser.addoption(
         "--anyio",
         choices=["asyncio", "trio"],
+        action="append",
         help=(
             "Use AnyIO implementation of the async API, run tests with "
             "specified backend. If unset, use plain asyncio implementation, "
-            "and run with asyncio backend."
+            "and run with asyncio backend. Can be specified multiple times."
         ),
     )
     parser.addoption(
@@ -68,17 +69,34 @@ def pytest_addoption(parser):
 
 def pytest_report_header(config):
     h = []
-    backend = config.getoption("--anyio")
-    if backend:
-        h.append(f"AnyIO backend: {backend}")
+    backends = config.getoption("--anyio")
+    if backends:
+        if len(set(backends)) != len(backends):
+            raise pytest.UsageError(f"duplicated --anyio options: {backends}")
+        h.append(f"AnyIO backend: {', '.join(backends)}")
     loop = config.getoption("--loop")
     if loop != "default":
-        if backend not in (None, "asyncio"):
+        if "asyncio" not in backends:
             raise pytest.UsageError(
-                f"--loop={loop} is incompatible with --anyio={backend}"
+                f"--loop={loop} only applies with --anyio=asyncio (or no --anyio)"
             )
         h.append(f"asyncio loop: {loop}")
     return h
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    if "anyio_backend" in metafunc.fixturenames:
+        params = []
+        backends = metafunc.config.getoption("--anyio")
+        if not backends or "asyncio" in backends:
+            loop = metafunc.config.getoption("--loop")
+            options = asyncio_options.copy()
+            if loop == "uvloop":
+                options["use_uvloop"] = True
+            params.append(pytest.param(("asyncio", options), id="asyncio"))
+        if backends and "trio" in backends:
+            params.append(pytest.param(("trio", {}), id="trio"))
+        metafunc.parametrize("anyio_backend", params, scope="session")
 
 
 asyncio_options: Dict[str, Any] = {}
@@ -87,15 +105,8 @@ if sys.platform == "win32" and sys.version_info >= (3, 8):
 
 
 @pytest.fixture(scope="session")
-def anyio_backend(pytestconfig):
-    opt = pytestconfig.getoption("--anyio")
-    if opt in (None, "asyncio"):
-        options = asyncio_options.copy()
-        if pytestconfig.option.loop == "uvloop":
-            options["use_uvloop"] = True
-        return "asyncio", options
-    elif opt == "trio":
-        return "trio", {}
+def anyio_backend(request):
+    return request.param
 
 
 @pytest.fixture(scope="session")
