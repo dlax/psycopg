@@ -1,6 +1,7 @@
 import re
-import subprocess as sp
+from collections import namedtuple
 
+from mypy import api
 import pytest
 
 
@@ -22,6 +23,9 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.slow)
 
 
+MypyResult = namedtuple("MypyResult", ["stdout", "stderr", "returncode"])
+
+
 @pytest.fixture(scope="session")
 def mypy(tmp_path_factory):
     cache_dir = tmp_path_factory.mktemp(basename="mypy_cache")
@@ -29,14 +33,13 @@ def mypy(tmp_path_factory):
 
     class MypyRunner:
         def run_on_file(self, filename):
-            cmdline = f"""
-                mypy
+            args = f"""
                 --strict
                 --show-error-codes --no-color-output --no-error-summary
                 --config-file= --cache-dir={cache_dir}
                 """.split()
-            cmdline.append(filename)
-            return sp.run(cmdline, stdout=sp.PIPE, stderr=sp.STDOUT)
+            args.append(filename)
+            return MypyResult(*api.run(args))
 
         def run_on_source(self, source):
             fn = src_dir / "tmp.py"

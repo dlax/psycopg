@@ -10,10 +10,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
     ["adapters_example.py", "typing_example.py"],
 )
 def test_typing_example(mypy, filename):
-    cp = mypy.run_on_file(os.path.join(HERE, filename))
-    errors = cp.stdout.decode("utf8", "replace").splitlines()
+    r = mypy.run_on_file(os.path.join(HERE, filename))
+    errors = r.stdout.splitlines()
     assert not errors
-    assert cp.returncode == 0
+    assert r.returncode == 0
 
 
 @pytest.mark.parametrize(
@@ -362,8 +362,8 @@ class MyCursor(psycopg.{cur_base_class}[Row]):
         cur3 = {await_} cur2.execute("")
         reveal_type(cur3)
 """
-    cp = mypy.run_on_source(src)
-    out = cp.stdout.decode("utf8", "replace").splitlines()
+    r = mypy.run_on_source(src)
+    out = r.stdout.splitlines()
     assert len(out) == 3
     types = [mypy.get_revealed(line) for line in out]
     assert types[0] == types[1]
@@ -402,8 +402,8 @@ async def tmp() -> None:
 ref: {type} = None  {ignore}
 reveal_type(ref)
 """
-    cp = mypy.run_on_source(src)
-    out = cp.stdout.decode("utf8", "replace").splitlines()
+    r = mypy.run_on_source(src)
+    out = r.stdout.splitlines()
     assert len(out) == 2, "\n".join(out)
     got, want = [mypy.get_revealed(line) for line in out]
     assert got == want
@@ -442,8 +442,8 @@ reveal_type(obj)
 ref: {type} = None  # type: ignore[assignment]
 reveal_type(ref)
 """
-    cp = mypy.run_on_source(src)
-    out = cp.stdout.decode("utf8", "replace").splitlines()
+    r = mypy.run_on_source(src)
+    out = r.stdout.splitlines()
     assert len(out) == 2, "\n".join(out)
     got, want = [mypy.get_revealed(line) for line in out]
     assert got == want

@@ -34,13 +34,13 @@ def test_connect(monkeypatch, dsn, args, kwargs, want_conninfo):
 
 
 def test_version(mypy):
-    cp = mypy.run_on_source(
+    r = mypy.run_on_source(
         """\
 from psycopg import __version__
 assert __version__
 """
     )
-    assert not cp.stdout
+    assert not r.stdout
 
 
 @pytest.mark.skipif(_psycopg is None, reason="C module test")
@@ -48,10 +48,10 @@ def test_version_c(mypy):
     # can be psycopg_c, psycopg_binary
     cpackage = _psycopg.__name__.split(".")[0]
 
-    cp = mypy.run_on_source(
+    r = mypy.run_on_source(
         f"""\
 from {cpackage} import __version__
 assert __version__
 """
     )
-    assert not cp.stdout
+    assert not r.stdout
