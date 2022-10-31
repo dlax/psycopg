@@ -1,4 +1,5 @@
 import select
+import selectors
 import socket
 import sys
 
@@ -44,30 +45,30 @@ def test_wait_conn_bad(dsn):
 def test_wait(pgconn, timeout):
     pgconn.send_query(b"select 1")
     gen = generators.execute(pgconn)
-    (res,) = waiting.wait(gen, pgconn.socket, **timeout)
+    (res,) = waiting.wait(gen, pgconn.socket, sel=waiting.selector(), **timeout)
     assert res.status == ExecStatus.TUPLES_OK
 
 
 waits_and_ids = [
-    (waiting.wait, "wait"),
-    (waiting.wait_selector, "wait_selector"),
+    ((waiting.wait, waiting.selector), "wait"),
+    ((waiting.wait_selector, selectors.DefaultSelector), "wait_selector"),
 ]
 if hasepoll:
-    waits_and_ids.append((waiting.wait_epoll, "wait_epoll"))
+    waits_and_ids.append(((waiting.wait_epoll, select.epoll), "wait_epoll"))
 
 waits, wids = list(zip(*waits_and_ids))
 
 
-@pytest.mark.parametrize("waitfn", waits, ids=wids)
+@pytest.mark.parametrize("waitfn, selector", waits, ids=wids)
 @pytest.mark.parametrize("wait, ready", zip(waiting.Wait, waiting.Ready))
 @skip_if_not_linux
-def test_wait_ready(waitfn, wait, ready):
+def test_wait_ready(waitfn, selector, wait, ready):
     def gen():
         r = yield wait
         return r
 
-    with socket.socket() as s:
-        r = waitfn(gen(), s.fileno())
+    with socket.socket() as s, selector() as sel:
+        r = waitfn(gen(), s.fileno(), sel=sel)
     assert r & ready
 
 
@@ -75,7 +76,8 @@ def test_wait_ready(waitfn, wait, ready):
 def test_wait_selector(pgconn, timeout):
     pgconn.send_query(b"select 1")
     gen = generators.execute(pgconn)
-    (res,) = waiting.wait_selector(gen, pgconn.socket, **timeout)
+    with selectors.DefaultSelector() as sel:
+        (res,) = waiting.wait_selector(gen, pgconn.socket, sel=sel, **timeout)
     assert res.status == ExecStatus.TUPLES_OK
 
 
@@ -83,8 +85,8 @@ def test_wait_selector_bad(pgconn):
     pgconn.send_query(b"select 1")
     gen = generators.execute(pgconn)
     pgconn.finish()
-    with pytest.raises(psycopg.OperationalError):
-        waiting.wait_selector(gen, pgconn.socket)
+    with pytest.raises(psycopg.OperationalError), selectors.DefaultSelector() as sel:
+        waiting.wait_selector(gen, pgconn.socket, sel=sel)
 
 
 @skip_no_epoll
@@ -92,7 +94,8 @@ def test_wait_selector_bad(pgconn):
 def test_wait_epoll(pgconn, timeout):
     pgconn.send_query(b"select 1")
     gen = generators.execute(pgconn)
-    (res,) = waiting.wait_epoll(gen, pgconn.socket, **timeout)
+    with select.epoll() as sel:
+        (res,) = waiting.wait_epoll(gen, pgconn.socket, sel=sel, **timeout)
     assert res.status == ExecStatus.TUPLES_OK
 
 
@@ -100,7 +103,8 @@ def test_wait_epoll(pgconn, timeout):
 def test_wait_epoll_bad(pgconn):
     pgconn.send_query(b"select 1")
     gen = generators.execute(pgconn)
-    (res,) = waiting.wait_epoll(gen, pgconn.socket)
+    with select.epoll() as sel:
+        (res,) = waiting.wait_epoll(gen, pgconn.socket, sel=sel)
     assert res.status == ExecStatus.TUPLES_OK
 
 

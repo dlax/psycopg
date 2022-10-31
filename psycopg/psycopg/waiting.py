@@ -14,7 +14,7 @@ import selectors
 from enum import IntEnum
 from typing import Optional
 from asyncio import get_event_loop, wait_for, Event, TimeoutError
-from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
+from selectors import BaseSelector, DefaultSelector, EVENT_READ, EVENT_WRITE
 
 from . import errors as e
 from .abc import PQGen, PQGenConn, RV
@@ -40,13 +40,16 @@ READY_W = Ready.W
 READY_RW = Ready.RW
 
 
-def wait_selector(gen: PQGen[RV], fileno: int, timeout: Optional[float] = None) -> RV:
+def wait_selector(
+    gen: PQGen[RV], fileno: int, *, sel: BaseSelector, timeout: Optional[float] = None
+) -> RV:
     """
     Wait for a generator using the best strategy available.
 
     :param gen: a generator performing database operations and yielding
         `Ready` values when it would block.
     :param fileno: the file descriptor to wait on.
+    :param sel: the Selector instance, opened.
     :param timeout: timeout (in seconds) to check for other interrupt, e.g.
         to allow Ctrl-C.
     :type timeout: float
@@ -57,17 +60,19 @@ def wait_selector(gen: PQGen[RV], fileno: int, timeout: Optional[float] = None) 
     """
     try:
         s = next(gen)
-        with DefaultSelector() as sel:
-            while True:
-                sel.register(fileno, s)
-                rlist = None
-                while not rlist:
-                    rlist = sel.select(timeout=timeout)
-                sel.unregister(fileno)
-                # note: this line should require a cast, but mypy doesn't complain
-                ready: Ready = rlist[0][1]
-                assert s & ready
-                s = gen.send(ready)
+        try:
+            sel.modify(fileno, s)
+        except (KeyError, FileNotFoundError):
+            sel.register(fileno, s)
+        while True:
+            rlist = None
+            while not rlist:
+                rlist = sel.select(timeout=timeout)
+            # note: this line should require a cast, but mypy doesn't complain
+            ready: Ready = rlist[0][1]
+            assert s & ready
+            s = gen.send(ready)
+            sel.modify(fileno, s)
 
     except StopIteration as ex:
         rv: RV = ex.args[0] if ex.args else None
@@ -214,7 +219,9 @@ async def wait_conn_async(gen: PQGenConn[RV], timeout: Optional[float] = None) -
         return rv
 
 
-def wait_epoll(gen: PQGen[RV], fileno: int, timeout: Optional[float] = None) -> RV:
+def wait_epoll(
+    gen: PQGen[RV], fileno: int, *, sel: select.epoll, timeout: Optional[float] = None
+) -> RV:
     """
     Wait for a generator using epoll where supported.
 
@@ -231,23 +238,25 @@ def wait_epoll(gen: PQGen[RV], fileno: int, timeout: Optional[float] = None) -> 
         else:
             timeout = int(timeout * 1000.0)
 
-        with select.epoll() as epoll:
+        evmask = poll_evmasks[s]
+        try:
+            sel.modify(fileno, evmask)
+        except FileNotFoundError:
+            sel.register(fileno, evmask)
+        while True:
+            fileevs = None
+            while not fileevs:
+                fileevs = sel.poll(timeout)
+            ev = fileevs[0][1]
+            ready = 0
+            if ev & ~select.EPOLLOUT:
+                ready = Ready.R
+            if ev & ~select.EPOLLIN:
+                ready |= Ready.W
+            assert s & ready
+            s = gen.send(ready)
             evmask = poll_evmasks[s]
-            epoll.register(fileno, evmask)
-            while True:
-                fileevs = None
-                while not fileevs:
-                    fileevs = epoll.poll(timeout)
-                ev = fileevs[0][1]
-                ready = 0
-                if ev & ~select.EPOLLOUT:
-                    ready = READY_R
-                if ev & ~select.EPOLLIN:
-                    ready |= READY_W
-                assert s & ready
-                s = gen.send(ready)
-                evmask = poll_evmasks[s]
-                epoll.modify(fileno, evmask)
+            sel.modify(fileno, evmask)
 
     except StopIteration as ex:
         rv: RV = ex.args[0] if ex.args else None
@@ -255,7 +264,7 @@ def wait_epoll(gen: PQGen[RV], fileno: int, timeout: Optional[float] = None) -> 
 
 
 if selectors.DefaultSelector is getattr(selectors, "EpollSelector", None):
-    wait = wait_epoll
+    wait, selector = wait_epoll, select.epoll
 
     poll_evmasks = {
         Wait.R: select.EPOLLONESHOT | select.EPOLLIN,
@@ -264,4 +273,4 @@ if selectors.DefaultSelector is getattr(selectors, "EpollSelector", None):
     }
 
 else:
-    wait = wait_selector
+    wait, selector = wait_selector, DefaultSelector  # type: ignore[assignment]

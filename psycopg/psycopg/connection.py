@@ -117,6 +117,8 @@ class BaseConnection(Generic[Row]):
         # Number of transaction blocks currently entered
         self._num_transactions = 0
 
+        self._selector = waiting.selector()
+        self._wait = partial(waiting.wait, sel=self._selector)
         self._closed = False  # closed by an explicit close()
         self._prepared: PrepareManager = PrepareManager()
         self._tpc: Optional[Tuple[Xid, bool]] = None  # xid, prepared
@@ -788,6 +790,7 @@ class Connection(BaseConnection[Row]):
         """Close the database connection."""
         if self.closed:
             return
+        self._selector.close()
         self._closed = True
         self.pgconn.finish()
 
@@ -953,14 +956,14 @@ class Connection(BaseConnection[Row]):
         fd (i.e. not on connect and reset).
         """
         try:
-            return waiting.wait(gen, self.pgconn.socket, timeout=timeout)
+            return self._wait(gen, self.pgconn.socket, timeout=timeout)
         except KeyboardInterrupt:
             # On Ctrl-C, try to cancel the query in the server, otherwise
             # the connection will remain stuck in ACTIVE state.
             c = self.pgconn.get_cancel()
             c.cancel()
             try:
-                waiting.wait(gen, self.pgconn.socket, timeout=timeout)
+                self._wait(gen, self.pgconn.socket, timeout=timeout)
             except e.QueryCanceled:
                 pass  # as expected
             raise
