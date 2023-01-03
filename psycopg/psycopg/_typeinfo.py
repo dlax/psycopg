@@ -154,7 +154,7 @@ SELECT
     typname AS name, oid, typarray AS array_oid,
     oid::regtype::text AS regtype, typdelim AS delimiter
 FROM pg_type t
-WHERE t.oid = %(name)s::regtype
+WHERE t.oid = to_regtype(%(name)s)
 ORDER BY t.oid
 """
 
@@ -190,7 +190,7 @@ SELECT t.typname AS name, t.oid AS oid, t.typarray AS array_oid,
     r.rngsubtype AS subtype_oid
 FROM pg_type t
 JOIN pg_range r ON t.oid = r.rngtypid
-WHERE t.oid = %(name)s::regtype
+WHERE t.oid = to_regtype(%(name)s)
 """
 
     def _added(self, registry: "TypesRegistry") -> None:
@@ -232,7 +232,7 @@ SELECT t.typname AS name, t.oid AS oid, t.typarray AS array_oid,
     r.rngtypid AS range_oid, r.rngsubtype AS subtype_oid
 FROM pg_type t
 JOIN pg_range r ON t.oid = r.rngmultitypid
-WHERE t.oid = %(name)s::regtype
+WHERE t.oid = to_regtype(%(name)s)
 """
 
     def _added(self, registry: "TypesRegistry") -> None:
@@ -282,14 +282,14 @@ LEFT JOIN (
         SELECT a.attrelid, a.attname, a.atttypid
         FROM pg_attribute a
         JOIN pg_type t ON t.typrelid = a.attrelid
-        WHERE t.oid = %(name)s::regtype
+        WHERE t.oid = to_regtype(%(name)s)
         AND a.attnum > 0
         AND NOT a.attisdropped
         ORDER BY a.attnum
     ) x
     GROUP BY attrelid
 ) a ON a.attrelid = t.typrelid
-WHERE t.oid = %(name)s::regtype
+WHERE t.oid = to_regtype(%(name)s)
 """
 
 
@@ -323,7 +323,7 @@ FROM (
     FROM pg_type t
     LEFT JOIN  pg_enum e
     ON e.enumtypid = t.oid
-    WHERE t.oid = %(name)s::regtype
+    WHERE t.oid = to_regtype(%(name)s)
     ORDER BY e.enumsortorder
 ) x
 GROUP BY name, oid, array_oid
