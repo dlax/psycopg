@@ -87,13 +87,10 @@ class TypeInfo:
         # This might result in a nested transaction. What we want is to leave
         # the function with the connection in the state we found (either idle
         # or intrans)
-        try:
-            with conn.transaction():
-                with conn.cursor(binary=True, row_factory=dict_row) as cur:
-                    cur.execute(cls._get_info_query(conn), {"name": name})
-                    recs = cur.fetchall()
-        except e.UndefinedObject:
-            return None
+        with conn.transaction():
+            with conn.cursor(binary=True, row_factory=dict_row) as cur:
+                cur.execute(cls._get_info_query(conn), {"name": name})
+                recs = cur.fetchall()
 
         return cls._from_records(name, recs)
 
@@ -106,13 +103,10 @@ class TypeInfo:
 
         Similar to `fetch()` but can use an asynchronous connection.
         """
-        try:
-            async with conn.transaction():
-                async with conn.cursor(binary=True, row_factory=dict_row) as cur:
-                    await cur.execute(cls._get_info_query(conn), {"name": name})
-                    recs = await cur.fetchall()
-        except e.UndefinedObject:
-            return None
+        async with conn.transaction():
+            async with conn.cursor(binary=True, row_factory=dict_row) as cur:
+                await cur.execute(cls._get_info_query(conn), {"name": name})
+                recs = await cur.fetchall()
 
         return cls._from_records(name, recs)
 

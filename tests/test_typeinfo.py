@@ -46,7 +46,15 @@ async def test_fetch_async(aconn, name, status):
 
 @pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
 @pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
-def test_fetch_not_found(conn, name, status):
+def test_fetch_not_found(conn, name, status, monkeypatch):
+    exit_orig = psycopg.Transaction.__exit__
+
+    def exit(self, exc_type, exc_val, exc_tb):
+        assert exc_val is None
+        return exit_orig(self, exc_type, exc_val, exc_tb)
+
+    monkeypatch.setattr(psycopg.Transaction, "__exit__", exit)
+
     status = getattr(TransactionStatus, status)
     if status == TransactionStatus.INTRANS:
         conn.execute("select 1")
@@ -60,7 +68,15 @@ def test_fetch_not_found(conn, name, status):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
 @pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
-async def test_fetch_not_found_async(aconn, name, status):
+async def test_fetch_not_found_async(aconn, name, status, monkeypatch):
+    exit_orig = psycopg.AsyncTransaction.__aexit__
+
+    async def aexit(self, exc_type, exc_val, exc_tb):
+        assert exc_val is None
+        return await exit_orig(self, exc_type, exc_val, exc_tb)
+
+    monkeypatch.setattr(psycopg.AsyncTransaction, "__aexit__", aexit)
+
     status = getattr(TransactionStatus, status)
     if status == TransactionStatus.INTRANS:
         await aconn.execute("select 1")
