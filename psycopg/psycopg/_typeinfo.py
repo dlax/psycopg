@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound="TypeInfo")
 RegistryKey: TypeAlias = Union[str, int, Tuple[type, int]]
+_AnyConn = Union["Connection[Any]", "AsyncConnection[Any]"]
 
 
 class TypeInfo:
@@ -71,7 +72,7 @@ class TypeInfo:
     @classmethod
     def fetch(
         cls: Type[T],
-        conn: "Union[Connection[Any], AsyncConnection[Any]]",
+        conn: _AnyConn,
         name: Union[str, "Identifier"],
     ) -> Any:
         """Query a system catalog to read information about a type."""
@@ -87,10 +88,13 @@ class TypeInfo:
         # This might result in a nested transaction. What we want is to leave
         # the function with the connection in the state we found (either idle
         # or intrans)
-        with conn.transaction():
-            with conn.cursor(binary=True, row_factory=dict_row) as cur:
-                cur.execute(cls._get_info_query(conn), {"name": name})
-                recs = cur.fetchall()
+        try:
+            with conn.transaction():
+                with conn.cursor(binary=True, row_factory=dict_row) as cur:
+                    cur.execute(cls._get_info_query(conn), {"name": name})
+                    recs = cur.fetchall()
+        except e.UndefinedObject:
+            return None
 
         return cls._from_records(name, recs)
 
@@ -103,10 +107,13 @@ class TypeInfo:
 
         Similar to `fetch()` but can use an asynchronous connection.
         """
-        async with conn.transaction():
-            async with conn.cursor(binary=True, row_factory=dict_row) as cur:
-                await cur.execute(cls._get_info_query(conn), {"name": name})
-                recs = await cur.fetchall()
+        try:
+            async with conn.transaction():
+                async with conn.cursor(binary=True, row_factory=dict_row) as cur:
+                    await cur.execute(cls._get_info_query(conn), {"name": name})
+                    recs = await cur.fetchall()
+        except e.UndefinedObject:
+            return None
 
         return cls._from_records(name, recs)
 
@@ -140,21 +147,34 @@ class TypeInfo:
             register_array(self, context)
 
     @classmethod
-    def _get_info_query(
-        cls, conn: "Union[Connection[Any], AsyncConnection[Any]]"
-    ) -> str:
-        return """\
+    def _get_info_query(cls, conn: _AnyConn) -> str:
+        return f"""\
 SELECT
     typname AS name, oid, typarray AS array_oid,
     oid::regtype::text AS regtype, typdelim AS delimiter
 FROM pg_type t
-WHERE t.oid = to_regtype(%(name)s)
+WHERE t.oid = {_to_regtype(conn)}
 ORDER BY t.oid
 """
 
     def _added(self, registry: "TypesRegistry") -> None:
         """Method called by the `!registry` when the object is added there."""
         pass
+
+
+def _has_to_regtype_function(conn: _AnyConn) -> bool:
+    # introduced in PostgreSQL 9.4 and CockroachDB 22.2
+    info = conn.info
+    return info.vendor == "PostgreSQL" or (
+        info.vendor == "CockroachDB" and info.server_version >= 220200
+    )
+
+
+def _to_regtype(conn: _AnyConn) -> str:
+    if _has_to_regtype_function(conn):
+        return "to_regtype(%(name)s)"
+    else:
+        return "%(name)s::regtype"
 
 
 class RangeInfo(TypeInfo):
@@ -175,9 +195,8 @@ class RangeInfo(TypeInfo):
         self.subtype_oid = subtype_oid
 
     @classmethod
-    def _get_info_query(
-        cls, conn: "Union[Connection[Any], AsyncConnection[Any]]"
-    ) -> str:
+    def _get_info_query(cls, conn: _AnyConn) -> str:
+        # CockroachDB does not support range so no need to use _to_regtype
         return """\
 SELECT t.typname AS name, t.oid AS oid, t.typarray AS array_oid,
     t.oid::regtype::text AS regtype,
@@ -213,13 +232,12 @@ class MultirangeInfo(TypeInfo):
         self.subtype_oid = subtype_oid
 
     @classmethod
-    def _get_info_query(
-        cls, conn: "Union[Connection[Any], AsyncConnection[Any]]"
-    ) -> str:
+    def _get_info_query(cls, conn: _AnyConn) -> str:
         if conn.info.server_version < 140000:
             raise e.NotSupportedError(
                 "multirange types are only available from PostgreSQL 14"
             )
+        # CockroachDB does not support range so no need to use _to_regtype
         return """\
 SELECT t.typname AS name, t.oid AS oid, t.typarray AS array_oid,
     t.oid::regtype::text AS regtype,
@@ -257,9 +275,8 @@ class CompositeInfo(TypeInfo):
         self.python_type: Optional[type] = None
 
     @classmethod
-    def _get_info_query(
-        cls, conn: "Union[Connection[Any], AsyncConnection[Any]]"
-    ) -> str:
+    def _get_info_query(cls, conn: _AnyConn) -> str:
+        # CockroachDB does not support range so no need to use _to_regtype
         return """\
 SELECT
     t.typname AS name, t.oid AS oid, t.typarray AS array_oid,
@@ -305,10 +322,8 @@ class EnumInfo(TypeInfo):
         self.enum: Optional[Type[Enum]] = None
 
     @classmethod
-    def _get_info_query(
-        cls, conn: "Union[Connection[Any], AsyncConnection[Any]]"
-    ) -> str:
-        return """\
+    def _get_info_query(cls, conn: _AnyConn) -> str:
+        return f"""\
 SELECT name, oid, array_oid, array_agg(label) AS labels
 FROM (
     SELECT
@@ -317,7 +332,7 @@ FROM (
     FROM pg_type t
     LEFT JOIN  pg_enum e
     ON e.enumtypid = t.oid
-    WHERE t.oid = to_regtype(%(name)s)
+    WHERE t.oid = {_to_regtype(conn)}
     ORDER BY e.enumsortorder
 ) x
 GROUP BY name, oid, array_oid

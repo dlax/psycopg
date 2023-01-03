@@ -4,6 +4,10 @@ import psycopg
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.types import TypeInfo
+from psycopg.types.enum import EnumInfo
+from psycopg.types.range import RangeInfo
+from psycopg.types.multirange import MultirangeInfo
+from psycopg.types.composite import CompositeInfo
 
 
 @pytest.mark.parametrize("name", ["text", sql.Identifier("text")])
@@ -44,45 +48,69 @@ async def test_fetch_async(aconn, name, status):
     assert info.array_oid == psycopg.adapters.types["text"].array_oid
 
 
-@pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
-@pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
-def test_fetch_not_found(conn, name, status, monkeypatch):
+_name = pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
+_status = pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
+_has_to_ragtype = pytest.mark.parametrize("has_to_regtype", [True, False])
+_info_cls = pytest.mark.parametrize(
+    "info_cls", [TypeInfo, RangeInfo, MultirangeInfo, CompositeInfo, EnumInfo]
+)
+
+
+@_name
+@_status
+@_has_to_ragtype
+@_info_cls
+def test_fetch_not_found(conn, name, status, monkeypatch, has_to_regtype, info_cls):
     exit_orig = psycopg.Transaction.__exit__
 
-    def exit(self, exc_type, exc_val, exc_tb):
-        assert exc_val is None
-        return exit_orig(self, exc_type, exc_val, exc_tb)
+    if has_to_regtype:
 
-    monkeypatch.setattr(psycopg.Transaction, "__exit__", exit)
+        def exit(self, exc_type, exc_val, exc_tb):
+            assert exc_val is None
+            return exit_orig(self, exc_type, exc_val, exc_tb)
 
+        monkeypatch.setattr(psycopg.Transaction, "__exit__", exit)
+    else:
+        monkeypatch.setattr(
+            "psycopg._typeinfo._has_to_regtype_function", lambda _: False
+        )
     status = getattr(TransactionStatus, status)
     if status == TransactionStatus.INTRANS:
         conn.execute("select 1")
 
     assert conn.info.transaction_status == status
-    info = TypeInfo.fetch(conn, name)
+    info = info_cls.fetch(conn, name)
     assert conn.info.transaction_status == status
     assert info is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
-@pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
-async def test_fetch_not_found_async(aconn, name, status, monkeypatch):
+@_name
+@_status
+@_has_to_ragtype
+@_info_cls
+async def test_fetch_not_found_async(
+    aconn, name, status, monkeypatch, has_to_regtype, info_cls
+):
     exit_orig = psycopg.AsyncTransaction.__aexit__
 
-    async def aexit(self, exc_type, exc_val, exc_tb):
-        assert exc_val is None
-        return await exit_orig(self, exc_type, exc_val, exc_tb)
+    if has_to_regtype:
 
-    monkeypatch.setattr(psycopg.AsyncTransaction, "__aexit__", aexit)
+        async def aexit(self, exc_type, exc_val, exc_tb):
+            assert exc_val is None
+            return await exit_orig(self, exc_type, exc_val, exc_tb)
 
+        monkeypatch.setattr(psycopg.AsyncTransaction, "__aexit__", aexit)
+    else:
+        monkeypatch.setattr(
+            "psycopg._typeinfo._has_to_regtype_function", lambda _: False
+        )
     status = getattr(TransactionStatus, status)
     if status == TransactionStatus.INTRANS:
         await aconn.execute("select 1")
 
     assert aconn.info.transaction_status == status
-    info = await TypeInfo.fetch(aconn, name)
+    info = await info_cls.fetch(aconn, name)
     assert aconn.info.transaction_status == status
 
     assert info is None
