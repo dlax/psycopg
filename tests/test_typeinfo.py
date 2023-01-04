@@ -4,10 +4,10 @@ import psycopg
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.types import TypeInfo
-from psycopg.types.enum import EnumInfo
-from psycopg.types.range import RangeInfo
-from psycopg.types.multirange import MultirangeInfo
 from psycopg.types.composite import CompositeInfo
+from psycopg.types.enum import EnumInfo
+from psycopg.types.multirange import MultirangeInfo
+from psycopg.types.range import RangeInfo
 
 
 @pytest.mark.parametrize("name", ["text", sql.Identifier("text")])
@@ -50,7 +50,6 @@ async def test_fetch_async(aconn, name, status):
 
 _name = pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
 _status = pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
-_has_to_regtype = pytest.mark.parametrize("has_to_regtype", [True, False])
 
 
 def _fetch_not_found(conn, name, status, monkeypatch, has_to_regtype, info_cls):
@@ -106,7 +105,7 @@ def test_fetch_not_found_MultirangeInfo(conn, name, status, monkeypatch):
 @_name
 @_status
 @pytest.mark.crdb_skip("composite")
-def test_fetch_not_found_MultirangeInfo(conn, name, status, monkeypatch):
+def test_fetch_not_found_CompositeInfo(conn, name, status, monkeypatch):
     _fetch_not_found(conn, name, status, monkeypatch, True, CompositeInfo)
 
 
@@ -186,7 +185,7 @@ async def test_fetch_not_found_MultirangeInfo_async(aconn, name, status, monkeyp
 @_name
 @_status
 @pytest.mark.crdb_skip("composite")
-async def test_fetch_not_found_MultirangeInfo_async(aconn, name, status, monkeypatch):
+async def test_fetch_not_found_CompositeInfo_async(aconn, name, status, monkeypatch):
     await _fetch_not_found_async(aconn, name, status, monkeypatch, True, CompositeInfo)
 
 
