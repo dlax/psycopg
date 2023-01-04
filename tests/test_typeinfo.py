@@ -50,17 +50,10 @@ async def test_fetch_async(aconn, name, status):
 
 _name = pytest.mark.parametrize("name", ["nosuch", sql.Identifier("nosuch")])
 _status = pytest.mark.parametrize("status", ["IDLE", "INTRANS"])
-_has_to_ragtype = pytest.mark.parametrize("has_to_regtype", [True, False])
-_info_cls = pytest.mark.parametrize(
-    "info_cls", [TypeInfo, RangeInfo, MultirangeInfo, CompositeInfo, EnumInfo]
-)
+_has_to_regtype = pytest.mark.parametrize("has_to_regtype", [True, False])
 
 
-@_name
-@_status
-@_has_to_ragtype
-@_info_cls
-def test_fetch_not_found(conn, name, status, monkeypatch, has_to_regtype, info_cls):
+def _fetch_not_found(conn, name, status, monkeypatch, has_to_regtype, info_cls):
     exit_orig = psycopg.Transaction.__exit__
 
     if has_to_regtype:
@@ -71,9 +64,7 @@ def test_fetch_not_found(conn, name, status, monkeypatch, has_to_regtype, info_c
 
         monkeypatch.setattr(psycopg.Transaction, "__exit__", exit)
     else:
-        monkeypatch.setattr(
-            "psycopg._typeinfo._has_to_regtype_function", lambda _: False
-        )
+        monkeypatch.setattr(TypeInfo, "_has_to_regtype_function", lambda _: False)
     status = getattr(TransactionStatus, status)
     if status == TransactionStatus.INTRANS:
         conn.execute("select 1")
@@ -84,12 +75,55 @@ def test_fetch_not_found(conn, name, status, monkeypatch, has_to_regtype, info_c
     assert info is None
 
 
-@pytest.mark.asyncio
 @_name
 @_status
-@_has_to_ragtype
-@_info_cls
-async def test_fetch_not_found_async(
+@pytest.mark.crdb_skip("to_regtype")
+def test_fetch_not_found_TypeInfo_to_regtype(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, True, TypeInfo)
+
+
+@_name
+@_status
+def test_fetch_not_found_TypeInfo_cast(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, False, TypeInfo)
+
+
+@_name
+@_status
+@pytest.mark.crdb_skip("range")
+def test_fetch_not_found_RangeInfo(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, True, RangeInfo)
+
+
+@_name
+@_status
+@pytest.mark.crdb_skip("range")
+@pytest.mark.pg(">= 14")
+def test_fetch_not_found_MultirangeInfo(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, True, MultirangeInfo)
+
+
+@_name
+@_status
+@pytest.mark.crdb_skip("composite")
+def test_fetch_not_found_MultirangeInfo(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, True, CompositeInfo)
+
+
+@_name
+@_status
+@pytest.mark.crdb_skip("to_regtype")
+def test_fetch_not_found_EnumInfo_to_regtype(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, True, EnumInfo)
+
+
+@_name
+@_status
+def test_fetch_not_found_EnumInfo_cast(conn, name, status, monkeypatch):
+    _fetch_not_found(conn, name, status, monkeypatch, False, EnumInfo)
+
+
+async def _fetch_not_found_async(
     aconn, name, status, monkeypatch, has_to_regtype, info_cls
 ):
     exit_orig = psycopg.AsyncTransaction.__aexit__
@@ -102,9 +136,7 @@ async def test_fetch_not_found_async(
 
         monkeypatch.setattr(psycopg.AsyncTransaction, "__aexit__", aexit)
     else:
-        monkeypatch.setattr(
-            "psycopg._typeinfo._has_to_regtype_function", lambda _: False
-        )
+        monkeypatch.setattr(TypeInfo, "_has_to_regtype_function", lambda _: False)
     status = getattr(TransactionStatus, status)
     if status == TransactionStatus.INTRANS:
         await aconn.execute("select 1")
@@ -114,6 +146,65 @@ async def test_fetch_not_found_async(
     assert aconn.info.transaction_status == status
 
     assert info is None
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+@pytest.mark.crdb_skip("to_regtype")
+async def test_fetch_not_found_TypeInfo_to_regtype_async(
+    aconn, name, status, monkeypatch
+):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, True, TypeInfo)
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+async def test_fetch_not_found_TypeInfo_cast_async(aconn, name, status, monkeypatch):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, False, TypeInfo)
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+@pytest.mark.crdb_skip("range")
+async def test_fetch_not_found_RangeInfo_async(aconn, name, status, monkeypatch):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, True, RangeInfo)
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+@pytest.mark.crdb_skip("range")
+@pytest.mark.pg(">= 14")
+async def test_fetch_not_found_MultirangeInfo_async(aconn, name, status, monkeypatch):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, True, MultirangeInfo)
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+@pytest.mark.crdb_skip("composite")
+async def test_fetch_not_found_MultirangeInfo_async(aconn, name, status, monkeypatch):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, True, CompositeInfo)
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+@pytest.mark.crdb_skip("to_regtype")
+async def test_fetch_not_found_EnumInfo_to_regtype_async(
+    aconn, name, status, monkeypatch
+):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, True, EnumInfo)
+
+
+@pytest.mark.asyncio
+@_name
+@_status
+async def test_fetch_not_found_EnumInfo_cast_async(aconn, name, status, monkeypatch):
+    await _fetch_not_found_async(aconn, name, status, monkeypatch, False, EnumInfo)
 
 
 @pytest.mark.crdb_skip("composite")
