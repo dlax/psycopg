@@ -19,7 +19,7 @@ from .rows import dict_row
 if TYPE_CHECKING:
     from .connection import Connection
     from .connection_async import AsyncConnection
-    from .sql import Identifier, SQL
+    from .sql import Composed, Identifier, SQL
 
 T = TypeVar("T", bound="TypeInfo")
 RegistryKey: TypeAlias = Union[str, int, Tuple[type, int]]
@@ -148,7 +148,7 @@ class TypeInfo:
             register_array(self, context)
 
     @classmethod
-    def _get_info_query(cls, conn: _AnyConn) -> Union[str, "SQL"]:
+    def _get_info_query(cls, conn: _AnyConn) -> Union[str, "Composed"]:
         from .sql import SQL
 
         return SQL(
@@ -329,7 +329,7 @@ class EnumInfo(TypeInfo):
         self.enum: Optional[Type[Enum]] = None
 
     @classmethod
-    def _get_info_query(cls, conn: _AnyConn) -> "SQL":
+    def _get_info_query(cls, conn: _AnyConn) -> "Composed":
         from .sql import SQL
 
         return SQL(
