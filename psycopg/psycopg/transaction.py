@@ -75,6 +75,14 @@ class BaseTransaction(Generic[ConnectionType]):
         # un-entered state is outside the public interface.
         return self._savepoint_name
 
+    @property
+    def _num_transactions(self) -> int:
+        return self._conn._num_transactions
+
+    @_num_transactions.setter
+    def _num_transactions(self, value: int) -> None:
+        self._conn._num_transactions = value
+
     def __repr__(self) -> str:
         cls = f"{self.__class__.__module__}.{self.__class__.__qualname__}"
         info = pq.misc.connection_summary(self.pgconn)
@@ -169,7 +177,7 @@ class BaseTransaction(Generic[ConnectionType]):
             )
 
         if self._outer_transaction:
-            assert not self._conn._num_transactions
+            assert not self._num_transactions
             yield b"COMMIT"
 
     def _get_rollback_commands(self) -> Iterator[bytes]:
@@ -186,7 +194,7 @@ class BaseTransaction(Generic[ConnectionType]):
             )
 
         if self._outer_transaction:
-            assert not self._conn._num_transactions
+            assert not self._num_transactions
             yield b"ROLLBACK"
 
         # Also clear the prepared statements cache.
@@ -203,14 +211,14 @@ class BaseTransaction(Generic[ConnectionType]):
         if self._outer_transaction:
             # outer transaction: if no name it's only a begin, else
             # there will be an additional savepoint
-            assert not self._conn._num_transactions
+            assert not self._num_transactions
         else:
             # inner transaction: it always has a name
             if not self._savepoint_name:
-                self._savepoint_name = f"_pg3_{self._conn._num_transactions + 1}"
+                self._savepoint_name = f"_pg3_{self._num_transactions + 1}"
 
-        self._stack_index = self._conn._num_transactions
-        self._conn._num_transactions += 1
+        self._stack_index = self._num_transactions
+        self._num_transactions += 1
 
     def _pop_savepoint(self, action: str) -> Optional[Exception]:
         """
@@ -218,8 +226,8 @@ class BaseTransaction(Generic[ConnectionType]):
 
         Also verify the state consistency.
         """
-        self._conn._num_transactions -= 1
-        if self._conn._num_transactions == self._stack_index:
+        self._num_transactions -= 1
+        if self._num_transactions == self._stack_index:
             return None
 
         return OutOfOrderTransactionNesting(
