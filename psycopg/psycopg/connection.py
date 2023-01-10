@@ -118,9 +118,6 @@ class BaseConnection(Generic[Row]):
         self._notice_handlers: List[NoticeHandler] = []
         self._notify_handlers: List[NotifyHandler] = []
 
-        # Number of transaction blocks currently entered
-        self._num_transactions = 0
-
         self._closed = False  # closed by an explicit close()
         self._prepared: PrepareManager = PrepareManager()
         self._tpc: Optional[Tuple[Xid, bool]] = None  # xid, prepared
@@ -193,7 +190,7 @@ class BaseConnection(Generic[Row]):
         raise NotImplementedError
 
     def _set_autocommit_gen(self, value: bool) -> PQGen[None]:
-        yield from self._check_intrans_gen("autocommit")
+        yield from self._executor.check_intrans_gen("autocommit")
         self._autocommit = bool(value)
 
     @property
@@ -211,7 +208,7 @@ class BaseConnection(Generic[Row]):
         raise NotImplementedError
 
     def _set_isolation_level_gen(self, value: Optional[IsolationLevel]) -> PQGen[None]:
-        yield from self._check_intrans_gen("isolation_level")
+        yield from self._executor.check_intrans_gen("isolation_level")
         self._isolation_level = IsolationLevel(value) if value is not None else None
         self._begin_statement = b""
 
@@ -230,7 +227,7 @@ class BaseConnection(Generic[Row]):
         raise NotImplementedError
 
     def _set_read_only_gen(self, value: Optional[bool]) -> PQGen[None]:
-        yield from self._check_intrans_gen("read_only")
+        yield from self._executor.check_intrans_gen("read_only")
         self._read_only = bool(value)
         self._begin_statement = b""
 
@@ -249,28 +246,9 @@ class BaseConnection(Generic[Row]):
         raise NotImplementedError
 
     def _set_deferrable_gen(self, value: Optional[bool]) -> PQGen[None]:
-        yield from self._check_intrans_gen("deferrable")
+        yield from self._executor.check_intrans_gen("deferrable")
         self._deferrable = bool(value)
         self._begin_statement = b""
-
-    def _check_intrans_gen(self, attribute: str) -> PQGen[None]:
-        # Raise an exception if we are in a transaction
-        status = self.pgconn.transaction_status
-        if status == IDLE and self._pipeline:
-            yield from self._pipeline._sync_gen()
-            status = self.pgconn.transaction_status
-        if status != IDLE:
-            if self._num_transactions:
-                raise e.ProgrammingError(
-                    f"can't change {attribute!r} now: "
-                    "connection.transaction() context in progress"
-                )
-            else:
-                raise e.ProgrammingError(
-                    f"can't change {attribute!r} now: "
-                    "connection in transaction status "
-                    f"{pq.TransactionStatus(status).name}"
-                )
 
     @property
     def info(self) -> ConnectionInfo:
@@ -503,7 +481,7 @@ class BaseConnection(Generic[Row]):
 
     def _commit_gen(self) -> PQGen[None]:
         """Generator implementing `Connection.commit()`."""
-        if self._num_transactions:
+        if self._executor.num_transactions:
             raise e.ProgrammingError(
                 "Explicit commit() forbidden within a Transaction "
                 "context. (Transaction will be automatically committed "
@@ -523,7 +501,7 @@ class BaseConnection(Generic[Row]):
 
     def _rollback_gen(self) -> PQGen[None]:
         """Generator implementing `Connection.rollback()`."""
-        if self._num_transactions:
+        if self._executor.num_transactions:
             raise e.ProgrammingError(
                 "Explicit rollback() forbidden within a Transaction "
                 "context. (Either raise Rollback() or allow "

@@ -77,11 +77,11 @@ class BaseTransaction(Generic[ConnectionType]):
 
     @property
     def _num_transactions(self) -> int:
-        return self._conn._num_transactions
+        return self._conn._executor.num_transactions
 
     @_num_transactions.setter
     def _num_transactions(self, value: int) -> None:
-        self._conn._num_transactions = value
+        self._conn._executor.num_transactions = value
 
     def __repr__(self) -> str:
         cls = f"{self.__class__.__module__}.{self.__class__.__qualname__}"

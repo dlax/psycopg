@@ -29,6 +29,8 @@ COMMAND_OK = pq.ExecStatus.COMMAND_OK
 TUPLES_OK = pq.ExecStatus.TUPLES_OK
 FATAL_ERROR = pq.ExecStatus.FATAL_ERROR
 
+IDLE = pq.TransactionStatus.IDLE
+
 
 @dataclass
 class Executor:
@@ -36,6 +38,8 @@ class Executor:
     pgconn: "PGconn"
 
     pipeline: Optional[BasePipeline] = field(default=None, init=False)
+    # Number of transaction blocks currently entered
+    num_transactions: int = field(default=0, init=False)
 
     def exec_command(
         self, command: bytes, result_format: pq.Format = TEXT
@@ -69,3 +73,22 @@ class Executor:
                     f" from command {command.decode()!r}"
                 )
         return result
+
+    def check_intrans_gen(self, attribute: str) -> PQGen[None]:
+        # Raise an exception if we are in a transaction
+        status = self.pgconn.transaction_status
+        if status == IDLE and self.pipeline:
+            yield from self.pipeline._sync_gen()
+            status = self.pgconn.transaction_status
+        if status != IDLE:
+            if self.num_transactions:
+                raise e.ProgrammingError(
+                    f"can't change {attribute!r} now: "
+                    "connection.transaction() context in progress"
+                )
+            else:
+                raise e.ProgrammingError(
+                    f"can't change {attribute!r} now: "
+                    "connection in transaction status "
+                    f"{pq.TransactionStatus(status).name}"
+                )
