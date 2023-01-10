@@ -447,7 +447,7 @@ class BaseConnection(Generic[Row]):
             f" in status {self.pgconn.status}"
         )
 
-    def _start_query(self) -> PQGen[None]:
+    def _start_query(self) -> PQGen[None]:  # TODO: -> Executor?
         """Generator to start a transaction if necessary."""
         if self._autocommit:
             return
@@ -479,7 +479,7 @@ class BaseConnection(Generic[Row]):
         self._begin_statement = b" ".join(parts)
         return self._begin_statement
 
-    def _commit_gen(self) -> PQGen[None]:
+    def _commit_gen(self) -> PQGen[None]:  # TODO: -> Executor?
         """Generator implementing `Connection.commit()`."""
         if self._executor.num_transactions:
             raise e.ProgrammingError(
@@ -499,7 +499,7 @@ class BaseConnection(Generic[Row]):
         if self._pipeline:
             yield from self._pipeline._sync_gen()
 
-    def _rollback_gen(self) -> PQGen[None]:
+    def _rollback_gen(self) -> PQGen[None]:  # TODO: -> Executor?
         """Generator implementing `Connection.rollback()`."""
         if self._executor.num_transactions:
             raise e.ProgrammingError(
@@ -560,7 +560,7 @@ class BaseConnection(Generic[Row]):
         self._tpc = (xid, False)
         yield from self._exec_command(self._get_tx_start_command())
 
-    def _tpc_prepare_gen(self) -> PQGen[None]:
+    def _tpc_prepare_gen(self) -> PQGen[None]:  # TODO: -> Executor?
         if not self._tpc:
             raise e.ProgrammingError(
                 "'tpc_prepare()' must be called inside a two-phase transaction"
