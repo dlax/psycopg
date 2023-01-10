@@ -27,11 +27,12 @@ from ._tpc import Xid
 from .rows import Row, RowFactory, tuple_row, TupleRow, args_row
 from .adapt import AdaptersMap
 from ._enums import IsolationLevel
+from ._execute import Executor
 from .cursor import Cursor
 from ._compat import LiteralString
 from .conninfo import make_conninfo, conninfo_to_dict, ConnectionInfo
 from ._pipeline import BasePipeline, Pipeline
-from .generators import notifies, connect, execute
+from .generators import notifies, connect
 from ._encodings import pgconn_encoding
 from ._preparing import PrepareManager
 from .transaction import Transaction
@@ -112,6 +113,8 @@ class BaseConnection(Generic[Row]):
         # None, but set to a copy of the global adapters map as soon as requested.
         self._adapters: Optional[AdaptersMap] = None
 
+        self._executor = Executor(pgconn)
+
         self._notice_handlers: List[NoticeHandler] = []
         self._notify_handlers: List[NotifyHandler] = []
 
@@ -129,8 +132,6 @@ class BaseConnection(Generic[Row]):
         # Attribute is only set if the connection is from a pool so we can tell
         # apart a connection in the pool too (when _pool = None)
         self._pool: Optional["BasePool[Any]"]
-
-        self._pipeline: Optional[BasePipeline] = None
 
         # Time after which the connection should be closed
         self._expire_at: float
@@ -287,6 +288,14 @@ class BaseConnection(Generic[Row]):
     def connection(self) -> "BaseConnection[Row]":
         # implement the AdaptContext protocol
         return self
+
+    @property
+    def _pipeline(self) -> Optional[BasePipeline]:
+        return self._executor.pipeline
+
+    @_pipeline.setter
+    def _pipeline(self, value: Optional[BasePipeline]) -> None:
+        self._executor.pipeline = value
 
     def fileno(self) -> int:
         """Return the file descriptor of the connection.
@@ -447,31 +456,9 @@ class BaseConnection(Generic[Row]):
         elif isinstance(command, Composable):
             command = command.as_bytes(self)
 
-        if self._pipeline:
-            cmd = partial(
-                self.pgconn.send_query_params,
-                command,
-                None,
-                result_format=result_format,
-            )
-            self._pipeline.command_queue.append(cmd)
-            self._pipeline.result_queue.append(None)
-            return None
+        return self._executor.exec_command(command, result_format)
 
-        self.pgconn.send_query_params(command, None, result_format=result_format)
-
-        result = (yield from execute(self.pgconn))[-1]
-        if result.status != COMMAND_OK and result.status != TUPLES_OK:
-            if result.status == FATAL_ERROR:
-                raise e.error_from_result(result, encoding=pgconn_encoding(self.pgconn))
-            else:
-                raise e.InterfaceError(
-                    f"unexpected result {pq.ExecStatus(result.status).name}"
-                    f" from command {command.decode()!r}"
-                )
-        return result
-
-    def _check_connection_ok(self) -> None:
+    def _check_connection_ok(self) -> None:  # TODO: move to Executor
         if self.pgconn.status == OK:
             return
 
