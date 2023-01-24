@@ -23,8 +23,12 @@ class Future(futures.Future[List["PGresult"]]):
     def set_result(self, results: List["PGresult"]) -> None:
         super().set_result(results)
         if self.obj is not None:
-            cursor = self.obj[0]
+            cursor, prepinfo = self.obj
             cursor._set_results(results)
+            if prepinfo:
+                key, prep, name = prepinfo
+                # Update the prepare state of the query.
+                cursor._conn._prepared.validate(key, prep, name, results)
 
 
 def create_future(

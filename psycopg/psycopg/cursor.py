@@ -305,12 +305,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
             self._conn._pipeline.result_queue.append(f)
             return
 
-        # run the query
         results = yield from execute(self._pgconn)
-
-        if key is not None:
-            self._conn._prepared.validate(key, prep, name, results)
-
         self._check_results(results)
         f.set_result(results)
 

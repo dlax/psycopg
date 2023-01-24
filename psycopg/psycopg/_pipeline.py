@@ -187,13 +187,9 @@ class BasePipeline:
                 raise exc
             future.set_result(results)
         else:
-            cursor, prepinfo = future.obj
+            cursor = future.obj[0]
             cursor._check_results(results)
             future.set_result(results)
-            if prepinfo:
-                key, prep, name = prepinfo
-                # Update the prepare state of the query.
-                cursor._conn._prepared.validate(key, prep, name, results)
 
     def _enqueue_sync(self) -> None:
         """Enqueue a PQpipelineSync() command."""
