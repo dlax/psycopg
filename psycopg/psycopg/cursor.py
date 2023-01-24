@@ -295,12 +295,14 @@ class BaseCursor(Generic[ConnectionType, Row]):
         # If an operation requires to flush our prepared statements cache,
         # it will be added to the maintenance commands to execute later.
         key = self._conn._prepared.maybe_add_to_cache(pgq, prep, name)
+        prepare_key = None
+        if key is not None:
+            prepare_key = (key, prep, name)
+
+        f = create_future((self, prepare_key))
 
         if self._conn._pipeline:
-            queued = None
-            if key is not None:
-                queued = (key, prep, name)
-            self._conn._pipeline.result_queue.append(create_future((self, queued)))
+            self._conn._pipeline.result_queue.append(f)
             return
 
         # run the query
@@ -310,7 +312,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
             self._conn._prepared.validate(key, prep, name, results)
 
         self._check_results(results)
-        self._set_results(results)
+        f.set_result(results)
 
     def _get_prepared(
         self, pgq: PostgresQuery, prepare: Optional[bool] = None
