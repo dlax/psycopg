@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from .waiting import Wait, Ready
     from .connection import BaseConnection
     from ._adapters_map import AdaptersMap
+    from ._preparing import Key, Prepare
 
 NoneType: type = type(None)
 
@@ -30,6 +31,7 @@ Query: TypeAlias = Union[LiteralString, bytes, "sql.SQL", "sql.Composed"]
 Params: TypeAlias = Union[Sequence[Any], Mapping[str, Any]]
 ConnectionType = TypeVar("ConnectionType", bound="BaseConnection[Any]")
 PipelineCommand: TypeAlias = Callable[[], None]
+PrepareKey: TypeAlias = Tuple["Key", "Prepare", bytes]
 DumperKey: TypeAlias = Union[type, Tuple["DumperKey", ...]]
 
 # Waiting protocol types

@@ -6,27 +6,21 @@ commands pipeline management
 
 import logging
 from types import TracebackType
-from typing import Any, List, Optional, Union, Tuple, Type, TypeVar, TYPE_CHECKING
-from typing_extensions import TypeAlias
+from typing import Any, List, Optional, Type, TypeVar, TYPE_CHECKING
 
 from . import pq
 from . import errors as e
 from .abc import PipelineCommand, PQGen
 from ._compat import Deque
 from ._encodings import pgconn_encoding
-from ._preparing import Key, Prepare
+from ._futures import Future, create_future
 from .generators import pipeline_communicate, fetch_many, send
 
 if TYPE_CHECKING:
     from .pq.abc import PGresult
-    from .cursor import BaseCursor
     from .connection import BaseConnection, Connection
     from .connection_async import AsyncConnection
 
-
-PendingResult: TypeAlias = Union[
-    None, Tuple["BaseCursor[Any, Any]", Optional[Tuple[Key, Prepare, bytes]]]
-]
 
 FATAL_ERROR = pq.ExecStatus.FATAL_ERROR
 PIPELINE_ABORTED = pq.ExecStatus.PIPELINE_ABORTED
@@ -40,14 +34,14 @@ logger = logging.getLogger("psycopg")
 class BasePipeline:
 
     command_queue: Deque[PipelineCommand]
-    result_queue: Deque[PendingResult]
+    result_queue: Deque[Future]
     _is_supported: Optional[bool] = None
 
     def __init__(self, conn: "BaseConnection[Any]") -> None:
         self._conn = conn
         self.pgconn = conn.pgconn
         self.command_queue = Deque[PipelineCommand]()
-        self.result_queue = Deque[PendingResult]()
+        self.result_queue = Deque[Future]()
         self.level = 0
 
     def __repr__(self) -> str:
@@ -173,9 +167,7 @@ class BasePipeline:
         for queued, results in to_process:
             self._process_results(queued, results)
 
-    def _process_results(
-        self, queued: PendingResult, results: List["PGresult"]
-    ) -> None:
+    def _process_results(self, future: Future, results: List["PGresult"]) -> None:
         """Process a results set fetched from the current pipeline.
 
         This matches 'results' with its respective element in the pipeline
@@ -183,16 +175,21 @@ class BasePipeline:
         checked directly. For prepare statement creation requests, update the
         cache. Otherwise, results are attached to their respective cursor.
         """
-        if queued is None:
+        if future.obj is None:
             (result,) = results
             if result.status == FATAL_ERROR:
-                raise e.error_from_result(result, encoding=pgconn_encoding(self.pgconn))
+                exc = e.error_from_result(result, encoding=pgconn_encoding(self.pgconn))
+                future.set_exception(exc)
+                raise exc
             elif result.status == PIPELINE_ABORTED:
-                raise e.PipelineAborted("pipeline aborted")
+                exc = e.PipelineAborted("pipeline aborted")
+                future.set_exception(exc)
+                raise exc
+            future.set_result(results)
         else:
-            cursor, prepinfo = queued
+            cursor, prepinfo = future.obj
             cursor._check_results(results)
-            cursor._set_results(results)
+            future.set_result(results)
             if prepinfo:
                 key, prep, name = prepinfo
                 # Update the prepare state of the query.
@@ -201,7 +198,7 @@ class BasePipeline:
     def _enqueue_sync(self) -> None:
         """Enqueue a PQpipelineSync() command."""
         self.command_queue.append(self.pgconn.pipeline_sync)
-        self.result_queue.append(None)
+        self.result_queue.append(create_future())
 
 
 class Pipeline(BasePipeline):

@@ -30,6 +30,7 @@ from ._enums import IsolationLevel
 from .cursor import Cursor
 from ._compat import LiteralString
 from .conninfo import make_conninfo, conninfo_to_dict, ConnectionInfo
+from ._futures import Future, create_future
 from ._pipeline import BasePipeline, Pipeline
 from .generators import notifies, connect, execute
 from ._encodings import pgconn_encoding
@@ -433,7 +434,7 @@ class BaseConnection(Generic[Row]):
 
     def _exec_command(
         self, command: Query, result_format: pq.Format = TEXT
-    ) -> PQGen[Optional["PGresult"]]:
+    ) -> PQGen[Future]:
         """
         Generator to send a command and receive the result to the backend.
 
@@ -447,6 +448,8 @@ class BaseConnection(Generic[Row]):
         elif isinstance(command, Composable):
             command = command.as_bytes(self)
 
+        f = create_future()
+
         if self._pipeline:
             cmd = partial(
                 self.pgconn.send_query_params,
@@ -455,21 +458,26 @@ class BaseConnection(Generic[Row]):
                 result_format=result_format,
             )
             self._pipeline.command_queue.append(cmd)
-            self._pipeline.result_queue.append(None)
-            return None
+            self._pipeline.result_queue.append(f)
+            return f
 
         self.pgconn.send_query_params(command, None, result_format=result_format)
 
         result = (yield from execute(self.pgconn))[-1]
         if result.status != COMMAND_OK and result.status != TUPLES_OK:
             if result.status == FATAL_ERROR:
-                raise e.error_from_result(result, encoding=pgconn_encoding(self.pgconn))
+                exc = e.error_from_result(result, encoding=pgconn_encoding(self.pgconn))
             else:
-                raise e.InterfaceError(
+                exc = e.InterfaceError(
                     f"unexpected result {pq.ExecStatus(result.status).name}"
                     f" from command {command.decode()!r}"
                 )
-        return result
+            f.set_exception(exc)
+            raise exc
+        else:
+            f.set_result([result])
+
+        return f
 
     def _check_connection_ok(self) -> None:
         if self.pgconn.status == OK:

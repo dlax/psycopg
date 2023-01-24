@@ -18,6 +18,7 @@ from .abc import ConnectionType, Query, Params, PQGen
 from .copy import Copy, Writer as CopyWriter
 from .rows import Row, RowMaker, RowFactory
 from ._column import Column
+from ._futures import create_future
 from ._queries import PostgresQuery, PostgresClientQuery
 from ._pipeline import Pipeline
 from ._encodings import pgconn_encoding
@@ -299,7 +300,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
             queued = None
             if key is not None:
                 queued = (key, prep, name)
-            self._conn._pipeline.result_queue.append((self, queued))
+            self._conn._pipeline.result_queue.append(create_future((self, queued)))
             return
 
         # run the query
@@ -545,7 +546,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
                     param_types=query.types,
                 )
             )
-            self._conn._pipeline.result_queue.append(None)
+            self._conn._pipeline.result_queue.append(create_future())
         else:
             self._pgconn.send_prepare(name, query.query, param_types=query.types)
 

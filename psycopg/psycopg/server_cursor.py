@@ -148,9 +148,8 @@ class ServerCursorMixin(BaseCursor[ConnectionType, Row]):
             query = sql.SQL(
                 "SELECT 1 FROM pg_catalog.pg_cursors WHERE name = {}"
             ).format(sql.Literal(self._name))
-            res = yield from self._conn._exec_command(query)
-            # pipeline mode otherwise, unsupported here.
-            assert res is not None
+            f = yield from self._conn._exec_command(query)
+            (res,) = f.result()
             if res.ntuples == 0:
                 return
 
@@ -169,9 +168,8 @@ class ServerCursorMixin(BaseCursor[ConnectionType, Row]):
             sql.SQL("ALL") if num is None else sql.Literal(num),
             sql.Identifier(self._name),
         )
-        res = yield from self._conn._exec_command(query, result_format=self._format)
-        # pipeline mode otherwise, unsupported here.
-        assert res is not None
+        f = yield from self._conn._exec_command(query, result_format=self._format)
+        (res,) = f.result()
 
         self.pgresult = res
         self._tx.set_pgresult(res, set_loaders=False)
