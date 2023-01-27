@@ -5,9 +5,8 @@ import psycopg.crdb
 from psycopg import errors as e
 from psycopg._compat import create_task
 
+import anyio
 import pytest
-
-from ..conftest import asyncio_backend
 
 pytestmark = [pytest.mark.crdb, pytest.mark.anyio]
 
@@ -65,23 +64,31 @@ async def test_broken(aconn):
 
 
 @pytest.mark.slow
-@asyncio_backend
-async def test_identify_closure(aconn_cls, dsn):
+async def test_identify_closure(aconn_cls, dsn, use_anyio):
     async with await aconn_cls.connect(dsn) as conn:
         async with await aconn_cls.connect(dsn) as conn2:
             cur = await conn.execute("show session_id")
             (session_id,) = await cur.fetchone()
 
-            async def closer():
-                await asyncio.sleep(0.2)
+            async def closer(sleepfn):
+                await sleepfn(0.2)
                 await conn2.execute("cancel session %s", [session_id])
 
-            t = create_task(closer())
-            t0 = time.time()
-            try:
-                with pytest.raises(psycopg.OperationalError):
-                    await conn.execute("select pg_sleep(3.0)")
-                dt = time.time() - t0
-                assert 0.2 < dt < 2
-            finally:
-                await asyncio.gather(t)
+            if not use_anyio:
+                t = create_task(closer(asyncio.sleep))
+                t0 = time.time()
+                try:
+                    with pytest.raises(psycopg.OperationalError):
+                        await conn.execute("select pg_sleep(3.0)")
+                    dt = time.time() - t0
+                    assert 0.2 < dt < 2
+                finally:
+                    await asyncio.gather(t)
+            else:
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(closer, anyio.sleep)
+                    t0 = time.time()
+                    with pytest.raises(psycopg.OperationalError):
+                        await conn.execute("select pg_sleep(3.0)")
+                    dt = time.time() - t0
+                    assert 0.2 < dt < 2

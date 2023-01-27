@@ -4,13 +4,13 @@ from typing import Any
 from operator import attrgetter
 from itertools import groupby
 
+import anyio
 import pytest
 
 import psycopg
 from psycopg import pq
 from psycopg import errors as e
 
-from .conftest import asyncio_backend
 from .test_pipeline import pipeline_aborted
 
 pytestmark = [
@@ -545,8 +545,7 @@ async def test_transaction_state_implicit_begin(aconn, trace):
     ] == [b' "" "BEGIN" 0']
 
 
-@asyncio_backend
-async def test_concurrency(aconn):
+async def test_concurrency(aconn, use_anyio):
     async with aconn.transaction():
         await aconn.execute("drop table if exists pipeline_concurrency")
         await aconn.execute("drop table if exists accessed")
@@ -559,24 +558,33 @@ async def test_concurrency(aconn):
         )
         await aconn.execute("create unlogged table accessed as (select now() as value)")
 
+    cursors = []
+
     async def update(value):
         cur = await aconn.execute(
             "insert into pipeline_concurrency(value) values (%s) returning value",
             (value,),
         )
         await aconn.execute("update accessed set value = now()")
-        return cur
+        cursors.append(cur)
 
     await aconn.set_autocommit(True)
 
     (before,) = await (await aconn.execute("select value from accessed")).fetchone()
 
     values = range(1, 10)
+    timeout = len(values)
     async with aconn.pipeline():
-        cursors = await asyncio.wait_for(
-            asyncio.gather(*[update(value) for value in values]),
-            timeout=len(values),
-        )
+        if not use_anyio:
+            await asyncio.wait_for(
+                asyncio.gather(*[update(value) for value in values]),
+                timeout=timeout,
+            )
+        else:
+            async with anyio.create_task_group() as tg:
+                with anyio.fail_after(timeout):
+                    for value in values:
+                        tg.start_soon(update, value)
 
     assert sum([(await cur.fetchone())[0] for cur in cursors]) == sum(values)
 

@@ -1,13 +1,13 @@
 import asyncio
 import logging
 
+import anyio
 import pytest
 
 from psycopg import Rollback
 from psycopg import errors as e
 from psycopg._compat import create_task
 
-from .conftest import asyncio_backend
 from .test_transaction import in_transaction, insert_row, inserted, get_exc_info
 from .test_transaction import ExpectedException, crdb_skip_external_observer
 from .test_transaction import create_test_table  # noqa  # autouse fixture
@@ -701,11 +701,13 @@ async def test_out_of_order_exit_same_name(aconn, exit_error):
 
 
 @pytest.mark.parametrize("what", ["commit", "rollback", "error"])
-@asyncio_backend
-async def test_concurrency(aconn, what):
+async def test_concurrency(aconn, what, use_anyio):
     await aconn.set_autocommit(True)
 
-    evs = [asyncio.Event() for i in range(3)]
+    if not use_anyio:
+        evs = [asyncio.Event() for i in range(3)]
+    else:
+        evs = [anyio.Event() for i in range(3)]  # type: ignore[misc]
 
     async def worker(unlock, wait_on):
         with pytest.raises(e.ProgrammingError) as ex:
@@ -730,14 +732,27 @@ async def test_concurrency(aconn, what):
         else:
             assert "transaction commit" in str(ex.value)
 
-    # Start a first transaction in a task
-    t1 = create_task(worker(unlock=evs[0], wait_on=evs[1]))
-    await evs[0].wait()
+    if not use_anyio:
+        # Start a first transaction in a task
+        t1 = create_task(worker(unlock=evs[0], wait_on=evs[1]))
+        await evs[0].wait()
 
-    # Start a nested transaction in a task
-    t2 = create_task(worker(unlock=evs[1], wait_on=evs[2]))
+        # Start a nested transaction in a task
+        t2 = create_task(worker(unlock=evs[1], wait_on=evs[2]))
 
-    # Terminate the first transaction before the second does
-    await asyncio.gather(t1)
-    evs[2].set()
-    await asyncio.gather(t2)
+        # Terminate the first transaction before the second does
+        await asyncio.gather(t1)
+        evs[2].set()
+        await asyncio.gather(t2)
+    else:
+        async with anyio.create_task_group() as tg2:
+            async with anyio.create_task_group() as tg1:
+                # Start a first transaction in a task
+                tg1.start_soon(worker, evs[0], evs[1])
+                await evs[0].wait()
+
+                # Start a nested transaction in a task
+                tg2.start_soon(worker, evs[1], evs[2])
+
+            # Terminate the first transaction before the second does
+            evs[2].set()
