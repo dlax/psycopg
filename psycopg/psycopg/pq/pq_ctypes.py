@@ -25,7 +25,7 @@ from .misc import error_message, connection_summary
 from ._enums import Format, ExecStatus, Trace
 
 # Imported locally to call them from __del__ methods
-from ._pq_ctypes import PQclear, PQfinish, PQfreeCancel, PQstatus
+from ._pq_ctypes import PQclear, PQfinish, PQfreeCancel, PQcancelFinish, PQstatus
 
 if TYPE_CHECKING:
     from . import abc
@@ -553,6 +553,17 @@ class PGconn:
         if not impl.PQsetSingleRowMode(self._pgconn_ptr):
             raise e.OperationalError("setting single row mode failed")
 
+    def cancel_conn(self) -> "PGcancelConn":
+        """
+        Requests that the server abandons processing of the current command.
+
+        See :pq:`PQcancelConn` for details.
+        """
+        rv = impl.PQcancelConn(self._pgconn_ptr)
+        if not rv:
+            raise e.OperationalError("couldn't create cancelConn object")
+        return PGcancelConn(rv)
+
     def get_cancel(self) -> "PGcancel":
         """
         Create an object with the information needed to cancel a command.
@@ -853,6 +864,65 @@ class PGresult:
         rv = impl.PQsetResultAttrs(self._pgresult_ptr, len(structs), array)
         if rv == 0:
             raise e.OperationalError("PQsetResultAttrs failed")
+
+
+class PGcancelConn:
+    """
+    Token to handle non-blocking cancelation requests.
+
+    Created by `PGconn.cancel_conn()`.
+    """
+
+    __slots__ = ("pgcancelconn_ptr",)
+
+    def __init__(self, pgcancelconn_ptr: impl.PGcancelConn_struct):
+        self.pgcancelconn_ptr: Optional[impl.PGcancelConn_struct] = pgcancelconn_ptr
+
+    def __del__(self) -> None:
+        self.finish()
+
+    @property
+    def status(self) -> int:
+        return impl.PQcancelStatus(self.pgcancelconn_ptr)
+
+    @property
+    def socket(self) -> int:
+        rv = impl.PQcancelSocket(self.pgcancelconn_ptr)
+        if rv == -1:
+            raise e.OperationalError("cancel connection not opened")
+        return rv
+
+    def poll(self) -> int:
+        return impl.PQcancelPoll(self.pgcancelconn_ptr)
+
+    @property
+    def error_message(self) -> str:
+        return impl.PQcancelErrorMessage(self.pgcancelconn_ptr).decode()
+
+    def send(self) -> None:
+        """Requests that the server abandons processing of the current command.
+
+        See :pq:`PQcancelSend` for details.
+        """
+        if not impl.PQcancelSend(self.pgcancelconn_ptr):
+            raise e.OperationalError(
+                f"couldn't send cancellation: {self.error_message}"
+            )
+
+    def finish(self) -> None:
+        """
+        Free the data structure created by `PQcancelConn()`.
+
+        Automatically invoked by `!__del__()`.
+
+        See :pq:`PQcancelFinish()` for details.
+        """
+        self.pgcancelconn_ptr, p = None, self.pgcancelconn_ptr
+        if p:
+            PQcancelFinish(p)
+
+    def reset(self) -> None:
+        impl.PQcancelReset(self.pgcancelconn_ptr)
 
 
 class PGcancel:

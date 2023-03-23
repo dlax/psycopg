@@ -219,6 +219,9 @@ class PGconn(Protocol):
     def set_single_row_mode(self) -> None:
         ...
 
+    def cancel_conn(self) -> "PGcancelConn":
+        ...
+
     def get_cancel(self) -> "PGcancel":
         ...
 
@@ -339,6 +342,32 @@ class PGresult(Protocol):
         ...
 
     def set_attributes(self, descriptions: List["PGresAttDesc"]) -> None:
+        ...
+
+
+class PGcancelConn(Protocol):
+    @property
+    def status(self) -> int:
+        ...
+
+    @property
+    def socket(self) -> int:
+        ...
+
+    def poll(self) -> int:
+        ...
+
+    @property
+    def error_message(self) -> str:
+        ...
+
+    def send(self) -> None:
+        ...
+
+    def finish(self) -> None:
+        ...
+
+    def reset(self) -> None:
         ...
 
 

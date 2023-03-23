@@ -1,14 +1,18 @@
+import contextlib
 import os
 import sys
+import time
 import ctypes
 import logging
 import weakref
 from select import select
+from typing import Iterator
 
 import pytest
 
 import psycopg
-from psycopg import pq
+from psycopg import pq, errors
+from psycopg.pq.abc import PGcancelConn, PGconn
 import psycopg.generators
 
 from ..utils import gc_collect
@@ -389,6 +393,98 @@ def test_set_single_row_mode(pgconn):
 
     pgconn.send_query(b"select 1")
     pgconn.set_single_row_mode()
+
+
+@contextlib.contextmanager
+def cancellable_query(pgconn: PGconn, monitor_conn: PGconn) -> Iterator[None]:
+    pgconn.send_query_params(b"SELECT pg_sleep($1)", [b"180"])
+    while True:
+        r = monitor_conn.exec_(
+            b"SELECT count(*) FROM pg_stat_activity"
+            b" WHERE query = 'SELECT pg_sleep($1)'"
+            b" AND state = 'active'"
+        )
+        assert r.status == pq.ExecStatus.TUPLES_OK
+        if r.get_value(0, 0) != b"0":
+            break
+
+        time.sleep(0.01)
+
+    yield None
+
+    res = pgconn.get_result()
+    assert res is not None
+    assert res.status == pq.ExecStatus.FATAL_ERROR
+    assert res.error_field(pq.DiagnosticField.SQLSTATE) == b"57014"
+    while pgconn.is_busy():
+        pgconn.consume_input()
+
+
+@pytest.mark.libpq("> 16")
+def test_cancel_nonblocking(dsn):
+    # mimic test_cancel() from src/test/modules/libpq_pipeline/libpq_pipeline.c
+    def connect() -> PGconn:
+        conn = pq.PGconn.connect(dsn.encode())
+        if conn.status != pq.ConnStatus.OK:
+            pytest.fail(
+                f"bad connection: {conn.error_message.decode('utf8', 'replace')}"
+            )
+        return conn
+
+    conn, monitor_conn = connect(), connect()
+    conn.nonblocking = 1
+
+    # test PQcancel
+    with cancellable_query(conn, monitor_conn):
+        cancel = conn.get_cancel()
+        cancel.cancel()
+
+    # PGcancel object can be reused for the next query
+    with cancellable_query(conn, monitor_conn):
+        cancel.cancel()
+
+    del cancel
+
+    cancel_conn = conn.cancel_conn()
+
+    # test PQcancelSend
+    with cancellable_query(conn, monitor_conn):
+        cancel_conn.send()
+        assert cancel_conn.status != pq.ConnStatus.BAD
+    cancel_conn.reset()
+
+    def wait(cancel_conn: PGcancelConn) -> None:
+        with pytest.raises(errors.OperationalError):
+            # Using the socket before first calling poll() is an error.
+            cancel_conn.socket
+        while True:
+            rv = cancel_conn.poll()
+            if rv == pq.PollingStatus.OK:
+                return
+            elif rv == pq.PollingStatus.READING:
+                select([cancel_conn.socket], [], [], 3)
+            elif rv == pq.PollingStatus.WRITING:
+                select([], [cancel_conn.socket], [], 3)
+            else:
+                pytest.fail(f"unexpected poll result: {rv}")
+
+    # test PQcancelConn and then polling with PQcancelPoll
+    with cancellable_query(conn, monitor_conn):
+        assert (
+            cancel_conn.status != pq.ConnStatus.BAD
+        ), f"bad cancel connection: {cancel_conn.error_message}"
+        wait(cancel_conn)
+        assert cancel_conn.status == pq.ConnStatus.OK
+
+    # test PQcancelReset works on the cancel connection and it can be reused
+    # after
+    cancel_conn.reset()
+    with cancellable_query(conn, monitor_conn):
+        assert cancel_conn.status != pq.ConnStatus.BAD, cancel_conn.error_message
+        wait(cancel_conn)
+        assert cancel_conn.status == pq.ConnStatus.OK
+
+    cancel_conn.finish()
 
 
 def test_cancel(pgconn):

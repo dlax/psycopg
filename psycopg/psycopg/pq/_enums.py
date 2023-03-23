@@ -31,6 +31,7 @@ class ConnStatus(IntEnum):
     GSS_STARTUP = auto()
     CHECK_TARGET = auto()
     CHECK_STANDBY = auto()
+    STARTING = auto()
 
 
 class PollingStatus(IntEnum):

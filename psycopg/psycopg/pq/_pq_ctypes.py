@@ -80,6 +80,10 @@ class PGnotify_struct(Structure):
     ]
 
 
+class PGcancelConn_struct(Structure):
+    _fields_: List[Tuple[str, type]] = []
+
+
 class PGcancel_struct(Structure):
     _fields_: List[Tuple[str, type]] = []
 
@@ -100,6 +104,7 @@ PGconn_ptr = POINTER(PGconn_struct)
 PGresult_ptr = POINTER(PGresult_struct)
 PQconninfoOption_ptr = POINTER(PQconninfoOption_struct)
 PGnotify_ptr = POINTER(PGnotify_struct)
+PGcancelConn_ptr = POINTER(PGcancelConn_struct)
 PGcancel_ptr = POINTER(PGcancel_struct)
 PGresAttDesc_ptr = POINTER(PGresAttDesc_struct)
 
@@ -528,6 +533,121 @@ PQsetSingleRowMode.restype = c_int
 
 # 33.6. Canceling Queries in Progress
 
+_PQcancelSend = None
+_PQcancelConn = None
+_PQcancelStatus = None
+_PQcancelPoll = None
+_PQcancelSocket = None
+_PQcancelErrorMessage = None
+_PQcancelFinish = None
+_PQcancelReset = None
+
+if libpq_version >= 160000:
+    _PQcancelSend = pq.PQcancelSend
+    _PQcancelSend.argtypes = [PGcancelConn_ptr]
+    _PQcancelSend.restype = c_int
+
+    _PQcancelConn = pq.PQcancelConn
+    _PQcancelConn.argtypes = [PGconn_ptr]
+    _PQcancelConn.restype = PGcancelConn_ptr
+
+    _PQcancelStatus = pq.PQcancelStatus
+    _PQcancelStatus.argtypes = [PGcancelConn_ptr]
+    _PQcancelStatus.restype = c_int
+
+    _PQcancelPoll = pq.PQcancelPoll
+    _PQcancelPoll.argtypes = [PGcancelConn_ptr]
+    _PQcancelPoll.restype = c_int
+
+    _PQcancelSocket = pq.PQcancelSocket
+    _PQcancelSocket.argtypes = [PGcancelConn_ptr]
+    _PQcancelSocket.restype = c_int
+
+    _PQcancelErrorMessage = pq.PQcancelErrorMessage
+    _PQcancelErrorMessage.argtypes = [PGcancelConn_ptr]
+    _PQcancelErrorMessage.restype = c_char_p
+
+    _PQcancelFinish = pq.PQcancelFinish
+    _PQcancelFinish.argtypes = [PGcancelConn_ptr]
+    _PQcancelFinish.restype = None
+
+    _PQcancelReset = pq.PQcancelReset
+    _PQcancelReset.argtypes = [PGcancelConn_ptr]
+    _PQcancelReset.restype = None
+
+
+def PQcancelSend(cancelconn: PGcancelConn_struct) -> int:
+    if not _PQcancelSend:
+        raise NotSupportedError(
+            "PQcancelSend requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQcancelSend(cancelconn)  # type: ignore[no-any-return]
+
+
+def PQcancelConn(pgconn: PGconn_struct) -> PGcancelConn_struct:
+    if not _PQcancelConn:
+        raise NotSupportedError(
+            "PQcancelConn requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQcancelConn(pgconn)  # type: ignore[no-any-return]
+
+
+def PQcancelStatus(cancelconn: PGcancelConn_struct) -> int:
+    if not _PQcancelStatus:
+        raise NotSupportedError(
+            "PQcancelStatus requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQcancelStatus(cancelconn)  # type: ignore[no-any-return]
+
+
+def PQcancelSocket(cancelconn: PGcancelConn_struct) -> int:
+    if not _PQcancelSocket:
+        raise NotSupportedError(
+            "PQcancelSocket requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQcancelSocket(cancelconn)  # type: ignore[no-any-return]
+
+
+def PQcancelPoll(cancelconn: PGcancelConn_struct) -> int:
+    if not _PQcancelPoll:
+        raise NotSupportedError(
+            "PQcancelPoll requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQcancelPoll(cancelconn)  # type: ignore[no-any-return]
+
+
+def PQcancelErrorMessage(cancelconn: PGcancelConn_struct) -> bytes:
+    if not _PQcancelErrorMessage:
+        raise NotSupportedError(
+            "PQcancelErrorMessage requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQcancelErrorMessage(cancelconn)  # type: ignore[no-any-return]
+
+
+def PQcancelFinish(cancelconn: PGcancelConn_struct) -> None:
+    if not _PQcancelFinish:
+        raise NotSupportedError(
+            "PQcancelFinish requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    _PQcancelFinish(cancelconn)
+
+
+def PQcancelReset(cancelconn: PGcancelConn_struct) -> None:
+    if not _PQcancelReset:
+        raise NotSupportedError(
+            "PQcancelReset requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    _PQcancelReset(cancelconn)
+
+
 PQgetCancel = pq.PQgetCancel
 PQgetCancel.argtypes = [PGconn_ptr]
 PQgetCancel.restype = PGcancel_ptr
@@ -740,6 +860,7 @@ def generate_stub() -> None:
         elif t.__name__ in (
             "LP_PGconn_struct",
             "LP_PGresult_struct",
+            "LP_PGcancelConn_struct",
             "LP_PGcancel_struct",
         ):
             if narg is not None:

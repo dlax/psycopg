@@ -40,6 +40,9 @@ cdef extern from "libpq-fe.h":
         int     be_pid
         char   *extra
 
+    ctypedef struct PGcancelConn:
+        pass
+
     ctypedef struct PGcancel:
         pass
 
@@ -81,6 +84,8 @@ cdef extern from "libpq-fe.h":
         CONNECTION_CHECK_WRITABLE
         CONNECTION_GSS_STARTUP
         # CONNECTION_CHECK_TARGET PG 12
+        # CONNECTION_CHECK_STANDBY PG ??
+        # CONNECTION_STARTING PG 16
 
     ctypedef enum PGTransactionStatusType:
         PQTRANS_IDLE
@@ -245,6 +250,14 @@ cdef extern from "libpq-fe.h":
     int PQsetSingleRowMode(PGconn *conn)
 
     # 33.6. Canceling Queries in Progress
+    int PQcancelSend(PGcancelConn *cancelConn)
+    PGcancelConn *PQcancelConn(PGconn *conn)
+    ConnStatusType PQcancelStatus(const PGcancelConn *cancelConn)
+    int PQcancelSocket(PGcancelConn *cancelConn)
+    PostgresPollingStatusType PQcancelPoll(PGcancelConn *cancelConn) nogil
+    char *PQcancelErrorMessage(const PGcancelConn *cancelConn)
+    void PQcancelFinish(PGcancelConn *cancelConn)
+    void PQcancelReset(PGcancelConn *cancelConn)
     PGcancel *PQgetCancel(PGconn *conn)
     void PQfreeCancel(PGcancel *cancel)
     int PQcancel(PGcancel *cancel, char *errbuf, int errbufsize)
@@ -317,5 +330,15 @@ typedef enum {
 #define PQpipelineSync(conn) 0
 #define PQsendFlushRequest(conn) 0
 #define PQsetTraceFlags(conn, stream) do {} while (0)
+#endif
+
+#if PG_VERSION_NUM < 160000
+#define PQcancelSend(cancelConn) 0
+#define PQcancelConn(conn) NULL
+#define PQcancelSocket(cancelConn) -1
+#define PQcancelPoll(cancelConn) CONNECTION_OK
+#define PQcancelErrorMessage(cancelConn) NULL
+#define PQcancelFinish(cancelConn) 0
+#define PQcancelReset(cancelConn) 0
 #endif
 """
