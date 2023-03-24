@@ -422,6 +422,9 @@ The `!AsyncConnection` class
             parameter is specified, or the `~psycopg._dns.resolve_hostaddr_async()`
             function is used.
 
+    .. automethod:: acancel
+    .. automethod:: cancel
+
     .. automethod:: close
 
         .. note:: You can use ``async with`` to close the connection

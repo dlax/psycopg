@@ -729,6 +729,11 @@ async def test_connect_context_copy(aconn_cls, dsn, aconn):
     await aconn2.close()
 
 
+async def test_acancel_closed(aconn):
+    await aconn.close()
+    await aconn.acancel()
+
+
 async def test_cancel_closed(aconn):
     await aconn.close()
     aconn.cancel()

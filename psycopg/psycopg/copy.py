@@ -181,20 +181,7 @@ class BaseCopy(Generic[ConnectionType]):
 
         return row
 
-    def _end_copy_out_gen(self, exc: Optional[BaseException]) -> PQGen[None]:
-        if not exc:
-            return
-
-        if self._pgconn.transaction_status != ACTIVE:
-            # The server has already finished to send copy data. The connection
-            # is already in a good state.
-            return
-
-        # Throw a cancel to the server, then consume the rest of the copy data
-        # (which might or might not have been already transferred entirely to
-        # the client, so we won't necessary see the exception associated with
-        # canceling).
-        self.connection.cancel()
+    def _end_copy_out_gen(self) -> PQGen[None]:
         try:
             while (yield from self._read_gen()):
                 pass
@@ -321,7 +308,20 @@ class Copy(BaseCopy["Connection[Any]"]):
             self.writer.finish(exc)
             self._finished = True
         else:
-            self.connection.wait(self._end_copy_out_gen(exc))
+            if not exc:
+                return
+
+            if self._pgconn.transaction_status != ACTIVE:
+                # The server has already finished to send copy data. The connection
+                # is already in a good state.
+                return
+
+            # Throw a cancel to the server, then consume the rest of the copy data
+            # (which might or might not have been already transferred entirely to
+            # the client, so we won't necessary see the exception associated with
+            # canceling).
+            self.connection.cancel()
+            self.connection.wait(self._end_copy_out_gen())
 
 
 class Writer(ABC):
@@ -536,7 +536,20 @@ class AsyncCopy(BaseCopy["AsyncConnection[Any]"]):
             await self.writer.finish(exc)
             self._finished = True
         else:
-            await self.connection.wait(self._end_copy_out_gen(exc))
+            if not exc:
+                return
+
+            if self._pgconn.transaction_status != ACTIVE:
+                # The server has already finished to send copy data. The connection
+                # is already in a good state.
+                return
+
+            # Throw a cancel to the server, then consume the rest of the copy data
+            # (which might or might not have been already transferred entirely to
+            # the client, so we won't necessary see the exception associated with
+            # canceling).
+            await self.connection.acancel()
+            await self.connection.wait(self._end_copy_out_gen())
 
 
 class AsyncWriter(ABC):

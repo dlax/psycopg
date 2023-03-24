@@ -31,7 +31,7 @@ from .cursor import Cursor
 from ._compat import LiteralString
 from .conninfo import make_conninfo, conninfo_to_dict, ConnectionInfo
 from ._pipeline import BasePipeline, Pipeline
-from .generators import notifies, connect, execute
+from .generators import notifies, cancel, connect, execute
 from ._encodings import pgconn_encoding
 from ._preparing import PrepareManager
 from .transaction import Transaction
@@ -297,22 +297,6 @@ class BaseConnection(Generic[Row]):
         """
         return self.pgconn.socket
 
-    def cancel(self) -> None:
-        """Cancel the current operation on the connection."""
-        # No-op if the connection is closed
-        # this allows to use the method as callback handler without caring
-        # about its life.
-        if self.closed:
-            return
-
-        if self._tpc and self._tpc[1]:
-            raise e.ProgrammingError(
-                "cancel() cannot be used with a prepared two-phase transaction"
-            )
-
-        c = self.pgconn.get_cancel()
-        c.cancel()
-
     def add_notice_handler(self, callback: NoticeHandler) -> None:
         """
         Register a callable to be invoked when a notice message is received.
@@ -561,6 +545,29 @@ class BaseConnection(Generic[Row]):
 
         if self._pipeline:
             yield from self._pipeline._sync_gen()
+
+    def _should_cancel(self) -> bool:
+        # No-op if the connection is closed
+        # this allows to use the method as callback handler without caring
+        # about its life.
+        if self.closed:
+            return False
+        if self._tpc and self._tpc[1]:
+            raise e.ProgrammingError(
+                "cancel() cannot be used with a prepared two-phase transaction"
+            )
+        return True
+
+    def _cancel_gen(self) -> PQGenConn[None]:
+        if not self._should_cancel():
+            return
+
+        try:
+            cancel_conn = self.pgconn.cancel_conn()
+        except e.NotSupportedError:
+            self.pgconn.get_cancel().cancel()
+        else:
+            yield from cancel(cancel_conn)
 
     def xid(self, format_id: int, gtrid: str, bqual: str) -> Xid:
         """
@@ -888,6 +895,10 @@ class Connection(BaseConnection[Row]):
         with self.lock:
             self.wait(self._rollback_gen())
 
+    def cancel(self, timeout: Optional[int] = None) -> None:
+        """Cancel the current operation on the connection."""
+        waiting.wait_conn(self._cancel_gen(), timeout)
+
     @contextmanager
     def transaction(
         self,
@@ -958,8 +969,7 @@ class Connection(BaseConnection[Row]):
         except KeyboardInterrupt:
             # On Ctrl-C, try to cancel the query in the server, otherwise
             # the connection will remain stuck in ACTIVE state.
-            c = self.pgconn.get_cancel()
-            c.cancel()
+            waiting.wait_conn(self._cancel_gen(), timeout=timeout)
             try:
                 waiting.wait(gen, self.pgconn.socket, timeout=timeout)
             except e.QueryCanceled:

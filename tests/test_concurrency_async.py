@@ -104,7 +104,7 @@ async def test_notifies(aconn_cls, aconn, dsn):
 async def canceller(aconn, errors):
     try:
         await asyncio.sleep(0.5)
-        aconn.cancel()
+        await aconn.acancel()
     except Exception as exc:
         errors.append(exc)
 

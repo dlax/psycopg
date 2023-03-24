@@ -292,6 +292,25 @@ class AsyncConnection(BaseConnection[Row]):
         async with self.lock:
             await self.wait(self._rollback_gen())
 
+    def cancel(self) -> None:
+        """Cancel the current operation on the connection.
+
+        In contrast with `acancel()`, this can be safely used in a signal handler.
+        """
+        if self._should_cancel():
+            self.pgconn.get_cancel().cancel()
+
+    async def acancel(self) -> None:
+        """Asynchronously cancel the current operation on the connection.
+
+        This is a non-blocking version of `cancel()` which leverages a more
+        secure and improved cancellation feature of the libpq.
+
+        In contrast with `cancel()`, it not appropriate for use in a signal
+        handler.
+        """
+        await waiting.wait_conn_async(self._cancel_gen())
+
     @asynccontextmanager
     async def transaction(
         self,
@@ -353,8 +372,7 @@ class AsyncConnection(BaseConnection[Row]):
 
             # On Ctrl-C, try to cancel the query in the server, otherwise
             # otherwise the connection will be stuck in ACTIVE state
-            c = self.pgconn.get_cancel()
-            c.cancel()
+            await waiting.wait_conn_async(self._cancel_gen())
             try:
                 await waiting.wait_async(gen, self.pgconn.socket)
             except e.QueryCanceled:
