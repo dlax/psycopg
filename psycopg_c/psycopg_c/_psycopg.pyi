@@ -13,7 +13,7 @@ from psycopg import pq
 from psycopg import abc
 from psycopg.rows import Row, RowMaker
 from psycopg.adapt import AdaptersMap, PyFormat
-from psycopg.pq.abc import PGconn, PGresult
+from psycopg.pq.abc import PGcancelConn, PGconn, PGresult
 from psycopg.connection import BaseConnection
 from psycopg._compat import Deque
 
@@ -54,6 +54,7 @@ class Transformer(abc.AdaptContext):
 
 # Generators
 def connect(conninfo: str) -> abc.PQGenConn[PGconn]: ...
+def cancel(cancel_conn: PGcancelConn) -> abc.PQGenConn[None]: ...
 def execute(pgconn: PGconn) -> abc.PQGen[List[PGresult]]: ...
 def send(pgconn: PGconn) -> abc.PQGen[None]: ...
 def fetch_many(pgconn: PGconn) -> abc.PQGen[List[PGresult]]: ...

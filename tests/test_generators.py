@@ -1,3 +1,4 @@
+import time
 from collections import deque
 from functools import partial
 from typing import List
@@ -7,6 +8,28 @@ import pytest
 import psycopg
 from psycopg import waiting
 from psycopg import pq
+
+
+def test_cancel(pgconn, conn, generators):
+    pgconn.send_query_params(b"SELECT pg_sleep($1)", [b"180"])
+    while not conn.execute(
+        "SELECT count(*) FROM pg_stat_activity"
+        " WHERE query = 'SELECT pg_sleep($1)'"
+        " AND state = 'active'"
+    ).fetchone():
+        time.sleep(0.01)
+    cancel_conn = pgconn.cancel_conn()
+    assert cancel_conn.status != pq.ConnStatus.BAD
+    gen = generators.cancel(cancel_conn)
+    waiting.wait_conn(gen)
+    assert cancel_conn.status == pq.ConnStatus.OK
+
+    res = pgconn.get_result()
+    assert res is not None
+    assert res.status == pq.ExecStatus.FATAL_ERROR
+    assert res.error_field(pq.DiagnosticField.SQLSTATE) == b"57014"
+    while pgconn.is_busy():
+        pgconn.consume_input()
 
 
 @pytest.fixture
