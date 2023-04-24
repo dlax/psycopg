@@ -691,6 +691,13 @@ class PGconn:
         if rv != 1:
             raise e.OperationalError("failed to sync pipeline")
 
+    def send_sync_message(self) -> None:
+        rv = impl.PQsendSyncMessage(self._pgconn_ptr)
+        if rv == 0:
+            raise e.OperationalError("connection not in pipeline mode")
+        if rv != 1:
+            raise e.OperationalError("failed to sync pipeline")
+
     def send_flush_request(self) -> None:
         """Sends a request for the server to flush its output buffer.
 

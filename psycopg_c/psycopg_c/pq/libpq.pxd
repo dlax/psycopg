@@ -291,6 +291,7 @@ cdef extern from "libpq-fe.h":
     int PQexitPipelineMode(PGconn *conn)
     int PQpipelineSync(PGconn *conn)
     int PQsendFlushRequest(PGconn *conn)
+    int PQsendSyncMessage(PGconn *conn)
 
 cdef extern from *:
     """
@@ -316,6 +317,7 @@ typedef enum {
 #define PQexitPipelineMode(conn) 1
 #define PQpipelineSync(conn) 0
 #define PQsendFlushRequest(conn) 0
+#define PQsendSyncMessage(conn) 0
 #define PQsetTraceFlags(conn, stream) do {} while (0)
 #endif
 """

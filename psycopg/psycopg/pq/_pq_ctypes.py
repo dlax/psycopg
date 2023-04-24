@@ -645,6 +645,7 @@ _PQenterPipelineMode = None
 _PQexitPipelineMode = None
 _PQpipelineSync = None
 _PQsendFlushRequest = None
+_PQsendSyncMessage = None
 
 if libpq_version >= 140000:
     _PQpipelineStatus = pq.PQpipelineStatus
@@ -666,6 +667,11 @@ if libpq_version >= 140000:
     _PQsendFlushRequest = pq.PQsendFlushRequest
     _PQsendFlushRequest.argtypes = [PGconn_ptr]
     _PQsendFlushRequest.restype = c_int
+
+if libpq_version >= 160000:
+    _PQsendSyncMessage = pq.PQsendSyncMessage
+    _PQsendSyncMessage.argtypes = [PGconn_ptr]
+    _PQsendSyncMessage.restype = c_int
 
 
 def PQpipelineStatus(pgconn: PGconn_struct) -> int:
@@ -711,6 +717,15 @@ def PQsendFlushRequest(pgconn: PGconn_struct) -> int:
             f" {libpq_version} available instead"
         )
     return _PQsendFlushRequest(pgconn)
+
+
+def PQsendSyncMessage(pgconn: PGconn_struct) -> int:
+    if not _PQsendSyncMessage:
+        raise NotSupportedError(
+            "PQsendSyncMessage requires libpq from PostgreSQL 16,"
+            f" {libpq_version} available instead"
+        )
+    return _PQsendSyncMessage(pgconn)
 
 
 # 33.18. SSL Support

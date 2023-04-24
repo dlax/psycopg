@@ -267,6 +267,9 @@ class PGconn(Protocol):
     def send_flush_request(self) -> None:
         ...
 
+    def send_sync_message(self) -> None:
+        ...
+
 
 class PGresult(Protocol):
     def clear(self) -> None:
