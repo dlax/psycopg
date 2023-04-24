@@ -101,7 +101,7 @@ class BasePipeline:
             #  Psycopg transaction(), we expect the IDLE state. By sync()-ing,
             #  we make sure all previous commands are completed and the
             #  transaction gets back to IDLE.
-            yield from self._sync_gen()
+            yield from self._sync_gen(flush=True)
         self.level += 1
 
     def _exit(self, exc: Optional[BaseException]) -> None:
@@ -118,10 +118,11 @@ class BasePipeline:
                 else:
                     raise exc2.with_traceback(None)
 
-    def _sync_gen(self) -> PQGen[None]:
-        self._enqueue_sync()
-        yield from self._communicate_gen()
-        yield from self._fetch_gen(flush=False)
+    def _sync_gen(self, flush: bool) -> PQGen[None]:
+        self._enqueue_sync(flush=flush)
+        if flush:
+            yield from self._communicate_gen()
+            yield from self._fetch_gen(flush=False)
 
     def _exit_gen(self) -> PQGen[None]:
         """
@@ -197,9 +198,11 @@ class BasePipeline:
                 # Update the prepare state of the query.
                 cursor._conn._prepared.validate(key, prep, name, results)
 
-    def _enqueue_sync(self) -> None:
+    def _enqueue_sync(self, *, flush: bool = True) -> None:
         """Enqueue a PQpipelineSync() command."""
-        self.command_queue.append(self.pgconn.pipeline_sync)
+        self.command_queue.append(
+            self.pgconn.pipeline_sync if flush else self.pgconn.send_sync_message
+        )
         self.result_queue.append(None)
 
 
@@ -213,13 +216,13 @@ class Pipeline(BasePipeline):
     def __init__(self, conn: "Connection[Any]") -> None:
         super().__init__(conn)
 
-    def sync(self) -> None:
+    def sync(self, *, flush: bool = True) -> None:
         """Sync the pipeline, send any pending command and receive and process
         all available results.
         """
         try:
             with self._conn.lock:
-                self._conn.wait(self._sync_gen())
+                self._conn.wait(self._sync_gen(flush))
         except e._NO_TRACEBACK as ex:
             raise ex.with_traceback(None)
 
@@ -257,10 +260,10 @@ class AsyncPipeline(BasePipeline):
     def __init__(self, conn: "AsyncConnection[Any]") -> None:
         super().__init__(conn)
 
-    async def sync(self) -> None:
+    async def sync(self, *, flush: bool = True) -> None:
         try:
             async with self._conn.lock:
-                await self._conn.wait(self._sync_gen())
+                await self._conn.wait(self._sync_gen(flush))
         except e._NO_TRACEBACK as ex:
             raise ex.with_traceback(None)
 

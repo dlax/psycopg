@@ -256,7 +256,7 @@ class BaseConnection(Generic[Row]):
         # Raise an exception if we are in a transaction
         status = self.pgconn.transaction_status
         if status == IDLE and self._pipeline:
-            yield from self._pipeline._sync_gen()
+            yield from self._pipeline._sync_gen(flush=True)
             status = self.pgconn.transaction_status
         if status != IDLE:
             if self._num_transactions:
@@ -492,7 +492,7 @@ class BaseConnection(Generic[Row]):
 
         yield from self._exec_command(self._get_tx_start_command())
         if self._pipeline:
-            yield from self._pipeline._sync_gen()
+            yield from self._pipeline._sync_gen(flush=True)
 
     def _get_tx_start_command(self) -> bytes:
         if self._begin_statement:
@@ -532,7 +532,7 @@ class BaseConnection(Generic[Row]):
         yield from self._exec_command(b"COMMIT")
 
         if self._pipeline:
-            yield from self._pipeline._sync_gen()
+            yield from self._pipeline._sync_gen(flush=True)
 
     def _rollback_gen(self) -> PQGen[None]:
         """Generator implementing `Connection.rollback()`."""
@@ -549,7 +549,7 @@ class BaseConnection(Generic[Row]):
 
         # Get out of a "pipeline aborted" state
         if self._pipeline:
-            yield from self._pipeline._sync_gen()
+            yield from self._pipeline._sync_gen(flush=True)
 
         if self.pgconn.transaction_status == IDLE:
             return
@@ -560,7 +560,7 @@ class BaseConnection(Generic[Row]):
             yield from self._exec_command(cmd)
 
         if self._pipeline:
-            yield from self._pipeline._sync_gen()
+            yield from self._pipeline._sync_gen(flush=True)
 
     def xid(self, format_id: int, gtrid: str, bqual: str) -> Xid:
         """
@@ -608,7 +608,7 @@ class BaseConnection(Generic[Row]):
         self._tpc = (xid, True)
         yield from self._exec_command(SQL("PREPARE TRANSACTION {}").format(str(xid)))
         if self._pipeline:
-            yield from self._pipeline._sync_gen()
+            yield from self._pipeline._sync_gen(flush=True)
 
     def _tpc_finish_gen(
         self, action: LiteralString, xid: Union[Xid, str, None]

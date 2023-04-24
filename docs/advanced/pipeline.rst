@@ -236,7 +236,7 @@ Synchronization points
 Flushing query results to the client can happen either when a synchronization
 point is established by Psycopg:
 
-- using the `Pipeline.sync()` method;
+- using the `Pipeline.sync(sync=True) <Pipeline.sync()>` method;
 - on `Connection.commit()` or `~Connection.rollback()`;
 - at the end of a `!Pipeline` block;
 - possibly when opening a nested `!Pipeline` block;
