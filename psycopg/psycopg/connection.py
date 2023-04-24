@@ -532,6 +532,8 @@ class BaseConnection(Generic[Row]):
         yield from self._exec_command(b"COMMIT")
 
         if self._pipeline:
+            # Flush the output buffer when syncing as we want the user to get
+            # errors directly upon commit.
             yield from self._pipeline._sync_gen(flush=True)
 
     def _rollback_gen(self) -> PQGen[None]:
@@ -560,6 +562,8 @@ class BaseConnection(Generic[Row]):
             yield from self._exec_command(cmd)
 
         if self._pipeline:
+            # Flush the output buffer when syncing as we want the user to get
+            # errors directly upon rollback.
             yield from self._pipeline._sync_gen(flush=True)
 
     def xid(self, format_id: int, gtrid: str, bqual: str) -> Xid:
@@ -608,6 +612,8 @@ class BaseConnection(Generic[Row]):
         self._tpc = (xid, True)
         yield from self._exec_command(SQL("PREPARE TRANSACTION {}").format(str(xid)))
         if self._pipeline:
+            # Flush the output buffer when syncing as we want the user to get
+            # errors directly upon TPC enter.
             yield from self._pipeline._sync_gen(flush=True)
 
     def _tpc_finish_gen(
