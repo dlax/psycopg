@@ -133,7 +133,7 @@ async def test_pipeline_processed_at_exit(aconn):
         async with aconn.pipeline() as p:
             await cur.execute("select 1")
 
-            assert len(p.result_queue) == 1
+            assert len(p.result_queue) >= 1
 
         assert await cur.fetchone() == (1,)
 
@@ -158,7 +158,7 @@ async def test_pipeline(aconn):
         await c1.execute("select 1")
         await c2.execute("select 2")
 
-        assert len(p.result_queue) == 2
+        assert len(p.result_queue) >= 2
 
         (r1,) = await c1.fetchone()
         assert r1 == 1

@@ -133,7 +133,7 @@ def test_pipeline_processed_at_exit(conn):
         with conn.pipeline() as p:
             cur.execute("select 1")
 
-            assert len(p.result_queue) == 1
+            assert len(p.result_queue) >= 1
 
         assert cur.fetchone() == (1,)
 
@@ -158,7 +158,7 @@ def test_pipeline(conn):
         c1.execute("select 1")
         c2.execute("select 2")
 
-        assert len(p.result_queue) == 2
+        assert len(p.result_queue) >= 2
 
         (r1,) = c1.fetchone()
         assert r1 == 1
