@@ -277,6 +277,36 @@ cdef class PGconn:
                 f"sending query and params failed: {error_message(self)}"
             )
 
+    def send_portal(
+        self,
+        const char *portal,
+        const char *command,
+        param_values: Optional[Sequence[Optional[bytes]]],
+        param_types: Optional[Sequence[int]] = None,
+        param_formats: Optional[Sequence[int]] = None,
+        int result_format = PqFormat.TEXT,
+    ) -> None:
+        _ensure_pgconn(self)
+
+        cdef Py_ssize_t cnparams
+        cdef libpq.Oid *ctypes
+        cdef char *const *cvalues
+        cdef int *clengths
+        cdef int *cformats
+        cnparams, ctypes, cvalues, clengths, cformats = _query_params_args(
+            param_values, param_types, param_formats)
+
+        cdef int rv
+        with nogil:
+            rv = libpq.PQsendPortal(
+                self._pgconn_ptr, portal, command, <int>cnparams, ctypes,
+                <const char *const *>cvalues, clengths, cformats, result_format)
+        _clear_query_params(ctypes, cvalues, clengths, cformats)
+        if not rv:
+            raise e.OperationalError(
+                f"sending portal failed: {error_message(self)}"
+            )
+
     def send_prepare(
         self,
         const char *name,

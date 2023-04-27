@@ -150,6 +150,17 @@ class PGconn(Protocol):
     ) -> None:
         ...
 
+    def send_portal(
+        self,
+        portal: bytes,
+        command: bytes,
+        param_values: Optional[Sequence[Optional[Buffer]]],
+        param_types: Optional[Sequence[int]] = None,
+        param_formats: Optional[Sequence[int]] = None,
+        result_format: int = Format.TEXT,
+    ) -> None:
+        ...
+
     def send_prepare(
         self,
         name: bytes,

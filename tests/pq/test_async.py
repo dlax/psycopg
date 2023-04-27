@@ -117,6 +117,17 @@ def test_send_query_params(pgconn):
         pgconn.send_query_params(b"select $1", [b"1"])
 
 
+def test_send_portal(pgconn):
+    pgconn.send_portal(b"myportal", b"select $1::int + $2", [b"5", b"3"])
+    (res,) = execute_wait(pgconn)
+    assert res.status == pq.ExecStatus.TUPLES_OK
+    assert res.get_value(0, 0) == b"8"
+
+    pgconn.finish()
+    with pytest.raises(psycopg.OperationalError):
+        pgconn.send_query_params(b"select $1", [b"1"])
+
+
 def test_send_prepare(pgconn):
     pgconn.send_prepare(b"prep", b"select $1::int + $2::int")
     (res,) = execute_wait(pgconn)

@@ -220,6 +220,15 @@ cdef extern from "libpq-fe.h":
                           const int *paramLengths,
                           const int *paramFormats,
                           int resultFormat) nogil
+    int PQsendPortal(PGconn *conn,
+                     const char *portal,
+                     const char *command,
+                     int nParams,
+                     const Oid *paramTypes,
+                     const char * const *paramValues,
+                     const int *paramLengths,
+                     const int *paramFormats,
+                     int resultFormat) nogil
     int PQsendPrepare(PGconn *conn,
                       const char *stmtName,
                       const char *query,

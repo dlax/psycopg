@@ -306,6 +306,22 @@ class PGconn:
                 f"sending query and params failed: {error_message(self)}"
             )
 
+    def send_portal(
+        self,
+        portal: bytes,
+        command: bytes,
+        param_values: Optional[Sequence[Optional["abc.Buffer"]]],
+        param_types: Optional[Sequence[int]] = None,
+        param_formats: Optional[Sequence[int]] = None,
+        result_format: int = Format.TEXT,
+    ) -> None:
+        args = self._query_params_args(
+            command, param_values, param_types, param_formats, result_format
+        )
+        self._ensure_pgconn()
+        if not impl.PQsendPortal(args[0], portal, *args[1:]):
+            raise e.OperationalError(f"sending portal failed: {error_message(self)}")
+
     def send_prepare(
         self,
         name: bytes,
