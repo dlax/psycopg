@@ -49,7 +49,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
     __slots__ = """
         _conn format _adapters arraysize _closed _results pgresult _pos
         _iresult _rowcount _query _tx _last_query _row_factory _make_row
-        _pgconn _execmany_returning
+        _pgconn _execmany_returning _portal
         __weakref__
         """.split()
 
@@ -58,8 +58,9 @@ class BaseCursor(Generic[ConnectionType, Row]):
     _tx: "Transformer"
     _make_row: RowMaker[Row]
     _pgconn: "PGconn"
+    _portal: str
 
-    def __init__(self, connection: ConnectionType):
+    def __init__(self, connection: ConnectionType, portal: str = ""):
         self._conn = connection
         self.format = TEXT
         self._pgconn = connection.pgconn
@@ -67,6 +68,7 @@ class BaseCursor(Generic[ConnectionType, Row]):
         self.arraysize = 1
         self._closed = False
         self._last_query: Optional[Query] = None
+        self._portal = portal
         self._reset()
 
     def _reset(self, reset_query: bool = True) -> None:
@@ -423,24 +425,47 @@ class BaseCursor(Generic[ConnectionType, Row]):
         if self._conn._pipeline:
             # In pipeline mode always use PQsendQueryParams - see #314
             # Multiple statements in the same query are not allowed anyway.
-            self._conn._pipeline.command_queue.append(
-                partial(
-                    self._pgconn.send_query_params,
+            if self._portal:
+                self._conn._pipeline.command_queue.append(
+                    partial(
+                        self._pgconn.send_portal,
+                        self._portal.encode(),
+                        query.query,
+                        query.params,
+                        param_formats=query.formats,
+                        param_types=query.types,
+                        result_format=fmt,
+                    )
+                )
+            else:
+                self._conn._pipeline.command_queue.append(
+                    partial(
+                        self._pgconn.send_query_params,
+                        query.query,
+                        query.params,
+                        param_formats=query.formats,
+                        param_types=query.types,
+                        result_format=fmt,
+                    )
+                )
+        elif force_extended or query.params or fmt == BINARY:
+            if self._portal:
+                self._pgconn.send_portal(
+                    self._portal.encode(),
                     query.query,
                     query.params,
                     param_formats=query.formats,
                     param_types=query.types,
                     result_format=fmt,
                 )
-            )
-        elif force_extended or query.params or fmt == BINARY:
-            self._pgconn.send_query_params(
-                query.query,
-                query.params,
-                param_formats=query.formats,
-                param_types=query.types,
-                result_format=fmt,
-            )
+            else:
+                self._pgconn.send_query_params(
+                    query.query,
+                    query.params,
+                    param_formats=query.formats,
+                    param_types=query.types,
+                    result_format=fmt,
+                )
         else:
             # If we can, let's use simple query protocol,
             # as it can execute more than one statement in a single query.
@@ -635,7 +660,9 @@ class Cursor(BaseCursor["Connection[Any]", Row]):
     _Self = TypeVar("_Self", bound="Cursor[Any]")
 
     @overload
-    def __init__(self: "Cursor[Row]", connection: "Connection[Row]"):
+    def __init__(
+        self: "Cursor[Row]", connection: "Connection[Row]", *, portal: str = ...
+    ):
         ...
 
     @overload
@@ -644,6 +671,7 @@ class Cursor(BaseCursor["Connection[Any]", Row]):
         connection: "Connection[Any]",
         *,
         row_factory: RowFactory[Row],
+        portal: str = ...,
     ):
         ...
 
@@ -652,8 +680,9 @@ class Cursor(BaseCursor["Connection[Any]", Row]):
         connection: "Connection[Any]",
         *,
         row_factory: Optional[RowFactory[Row]] = None,
+        portal: str = "",
     ):
-        super().__init__(connection)
+        super().__init__(connection, portal)
         self._row_factory = row_factory or connection.row_factory
 
     def __enter__(self: _Self) -> _Self:

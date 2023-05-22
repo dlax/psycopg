@@ -29,7 +29,12 @@ class AsyncCursor(BaseCursor["AsyncConnection[Any]", Row]):
     _Self = TypeVar("_Self", bound="AsyncCursor[Any]")
 
     @overload
-    def __init__(self: "AsyncCursor[Row]", connection: "AsyncConnection[Row]"):
+    def __init__(
+        self: "AsyncCursor[Row]",
+        connection: "AsyncConnection[Row]",
+        *,
+        portal: str = ...,
+    ):
         ...
 
     @overload
@@ -38,6 +43,7 @@ class AsyncCursor(BaseCursor["AsyncConnection[Any]", Row]):
         connection: "AsyncConnection[Any]",
         *,
         row_factory: AsyncRowFactory[Row],
+        portal: str = ...,
     ):
         ...
 
@@ -46,8 +52,9 @@ class AsyncCursor(BaseCursor["AsyncConnection[Any]", Row]):
         connection: "AsyncConnection[Any]",
         *,
         row_factory: Optional[AsyncRowFactory[Row]] = None,
+        portal: str = "",
     ):
-        super().__init__(connection)
+        super().__init__(connection, portal)
         self._row_factory = row_factory or connection.row_factory
 
     async def __aenter__(self: _Self) -> _Self:

@@ -502,6 +502,27 @@ def test_execute_binary(conn):
     assert cur.pgresult.fformat(0) == 1
 
 
+def test_portal(conn):
+    conn.autocommit = True
+
+    cur = conn.execute("select 'noportal', %s, %s", [1, 2])
+    assert cur.fetchone()[1:] == (1, 2)
+
+    cur = conn.execute("select 'portal', %s, %s", [1, 2], portal="test1")
+    assert cur.fetchone()[1:] == (1, 2)
+
+    cur = conn.execute(
+        "select 'portal+prepare', %s, %s", [1, 2], portal="test2", prepare=True
+    )
+    assert cur.fetchone()[1:] == (1, 2)
+
+    with conn.pipeline():
+        c1 = conn.execute("select 'pipeline+portal', %s, %s", (1, 2), portal="test3")
+        c2 = conn.execute("select 'pipeline+portal', %s, %s", (3, 4), portal="test4")
+    assert c1.fetchone()[1:] == (1, 2)
+    assert c2.fetchone()[1:] == (3, 4)
+
+
 def test_row_factory(conn_cls, dsn):
     defaultconn = conn_cls.connect(dsn)
     assert defaultconn.row_factory is tuple_row

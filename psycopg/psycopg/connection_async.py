@@ -200,7 +200,7 @@ class AsyncConnection(BaseConnection[Row]):
         self.pgconn.finish()
 
     @overload
-    def cursor(self, *, binary: bool = False) -> AsyncCursor[Row]:
+    def cursor(self, *, binary: bool = False, portal: str = ...) -> AsyncCursor[Row]:
         ...
 
     @overload
@@ -217,6 +217,7 @@ class AsyncConnection(BaseConnection[Row]):
         binary: bool = False,
         scrollable: Optional[bool] = None,
         withhold: bool = False,
+        portal: str = "",
     ) -> AsyncServerCursor[Row]:
         ...
 
@@ -229,6 +230,7 @@ class AsyncConnection(BaseConnection[Row]):
         row_factory: AsyncRowFactory[CursorRow],
         scrollable: Optional[bool] = None,
         withhold: bool = False,
+        portal: str = "",
     ) -> AsyncServerCursor[CursorRow]:
         ...
 
@@ -240,6 +242,7 @@ class AsyncConnection(BaseConnection[Row]):
         row_factory: Optional[AsyncRowFactory[Any]] = None,
         scrollable: Optional[bool] = None,
         withhold: bool = False,
+        portal: str = "",
     ) -> Union[AsyncCursor[Any], AsyncServerCursor[Any]]:
         """
         Return a new `AsyncCursor` to send commands and queries to the connection.
@@ -251,6 +254,8 @@ class AsyncConnection(BaseConnection[Row]):
 
         cur: Union[AsyncCursor[Any], AsyncServerCursor[Any]]
         if name:
+            if portal:
+                raise ValueError("named cursor cannot be used with a portal")
             cur = self.server_cursor_factory(
                 self,
                 name=name,
@@ -259,7 +264,7 @@ class AsyncConnection(BaseConnection[Row]):
                 withhold=withhold,
             )
         else:
-            cur = self.cursor_factory(self, row_factory=row_factory)
+            cur = self.cursor_factory(self, row_factory=row_factory, portal=portal)
 
         if binary:
             cur.format = BINARY
@@ -273,9 +278,10 @@ class AsyncConnection(BaseConnection[Row]):
         *,
         prepare: Optional[bool] = None,
         binary: bool = False,
+        portal: str = "",
     ) -> AsyncCursor[Row]:
         try:
-            cur = self.cursor()
+            cur = self.cursor(portal=portal)
             if binary:
                 cur.format = BINARY
 

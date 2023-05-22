@@ -505,6 +505,30 @@ async def test_execute(aconn):
     assert await cur.fetchone() == (12, 22)
 
 
+async def test_portal(aconn):
+    await aconn.set_autocommit(True)
+    cur = await aconn.execute("select 'noportal', %s, %s", [1, 2])
+    assert (await cur.fetchone())[1:] == (1, 2)
+
+    cur = await aconn.execute("select 'portal', %s, %s", [1, 2], portal="test1")
+    assert (await cur.fetchone())[1:] == (1, 2)
+
+    cur = await aconn.execute(
+        "select 'portal+prepare', %s, %s", [1, 2], portal="test2", prepare=True
+    )
+    assert (await cur.fetchone())[1:] == (1, 2)
+
+    async with aconn.pipeline():
+        c1 = await aconn.execute(
+            "select 'pipeline+portal', %s, %s", (1, 2), portal="test3"
+        )
+        c2 = await aconn.execute(
+            "select 'pipeline+portal', %s, %s", (3, 4), portal="test4"
+        )
+    assert (await c1.fetchone())[1:] == (1, 2)
+    assert (await c2.fetchone())[1:] == (3, 4)
+
+
 async def test_execute_binary(aconn):
     cur = await aconn.execute("select %s, %s", [10, 20], binary=True)
     assert await cur.fetchone() == (10, 20)

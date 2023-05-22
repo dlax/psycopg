@@ -793,7 +793,7 @@ class Connection(BaseConnection[Row]):
         self.pgconn.finish()
 
     @overload
-    def cursor(self, *, binary: bool = False) -> Cursor[Row]:
+    def cursor(self, *, binary: bool = False, portal: str = ...) -> Cursor[Row]:
         ...
 
     @overload
@@ -810,6 +810,7 @@ class Connection(BaseConnection[Row]):
         binary: bool = False,
         scrollable: Optional[bool] = None,
         withhold: bool = False,
+        portal: str = "",
     ) -> ServerCursor[Row]:
         ...
 
@@ -822,6 +823,7 @@ class Connection(BaseConnection[Row]):
         row_factory: RowFactory[CursorRow],
         scrollable: Optional[bool] = None,
         withhold: bool = False,
+        portal: str = "",
     ) -> ServerCursor[CursorRow]:
         ...
 
@@ -833,6 +835,7 @@ class Connection(BaseConnection[Row]):
         row_factory: Optional[RowFactory[Any]] = None,
         scrollable: Optional[bool] = None,
         withhold: bool = False,
+        portal: str = "",
     ) -> Union[Cursor[Any], ServerCursor[Any]]:
         """
         Return a new cursor to send commands and queries to the connection.
@@ -844,6 +847,8 @@ class Connection(BaseConnection[Row]):
 
         cur: Union[Cursor[Any], ServerCursor[Any]]
         if name:
+            if portal:
+                raise ValueError("named cursor cannot be used with a portal")
             cur = self.server_cursor_factory(
                 self,
                 name=name,
@@ -852,7 +857,7 @@ class Connection(BaseConnection[Row]):
                 withhold=withhold,
             )
         else:
-            cur = self.cursor_factory(self, row_factory=row_factory)
+            cur = self.cursor_factory(self, row_factory=row_factory, portal=portal)
 
         if binary:
             cur.format = BINARY
@@ -866,10 +871,11 @@ class Connection(BaseConnection[Row]):
         *,
         prepare: Optional[bool] = None,
         binary: bool = False,
+        portal: str = "",
     ) -> Cursor[Row]:
         """Execute a query and return a cursor to read its results."""
         try:
-            cur = self.cursor()
+            cur = self.cursor(portal=portal)
             if binary:
                 cur.format = BINARY
 
