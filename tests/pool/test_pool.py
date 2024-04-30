@@ -485,7 +485,7 @@ def test_reconnect(proxy, caplog, monkeypatch):
     monkeypatch.setattr(pool.base.AttemptWithBackoff, "DELAY_JITTER", 0.0)
 
     caplog.clear()
-    proxy.start()
+    proxy.start(1)
     with pool.ConnectionPool(proxy.client_dsn, min_size=1) as p:
         p.wait(2.0)
         proxy.stop()
@@ -495,7 +495,7 @@ def test_reconnect(proxy, caplog, monkeypatch):
                 conn.execute("select 1")
 
         sleep(1.0)
-        proxy.start()
+        proxy.start(1)
         p.wait()
 
         with p.connection() as conn:
@@ -516,7 +516,7 @@ def test_reconnect(proxy, caplog, monkeypatch):
 @pytest.mark.timing
 @pytest.mark.parametrize("async_cb", [pytest.param(True, marks=skip_sync), False])
 def test_reconnect_failure(proxy, async_cb):
-    proxy.start()
+    proxy.start(1)
 
     t1 = None
 
@@ -554,7 +554,7 @@ def test_reconnect_failure(proxy, async_cb):
         assert t1 - t0 == pytest.approx(1.0, 0.1)
         assert p._nconns == 0
 
-        proxy.start()
+        proxy.start(1)
         t0 = time()
         with p.connection() as conn:
             conn.execute("select 1")
@@ -585,7 +585,7 @@ def test_reconnect_after_grow_failed(proxy):
         ev.clear()
         ev.wait(2.0)
 
-        proxy.start()
+        proxy.start(4)
 
         with p.connection(timeout=2) as conn:
             conn.execute("select 1")
@@ -596,7 +596,7 @@ def test_reconnect_after_grow_failed(proxy):
 
 @pytest.mark.slow
 def test_refill_on_check(proxy):
-    proxy.start()
+    proxy.start(4)
     ev = Event()
 
     def failed(pool):
@@ -617,7 +617,7 @@ def test_refill_on_check(proxy):
         assert len(p._pool) == 0
 
         # Allow to connect again
-        proxy.start()
+        proxy.start(4)
 
         # Make sure that check has refilled the pool
         p.check()
@@ -820,7 +820,7 @@ def test_getconn_check(dsn, caplog, autocommit):
 
 @pytest.mark.slow
 def test_connect_check_timeout(dsn, proxy):
-    proxy.start()
+    proxy.start(1)
     with pool.ConnectionPool(
         proxy.client_dsn,
         min_size=1,
@@ -856,7 +856,7 @@ def test_check_max_lifetime(dsn):
 
 @pytest.mark.slow
 def test_stats_connect(proxy, monkeypatch):
-    proxy.start()
+    proxy.start(3)
     delay_connection(monkeypatch, 0.2)
     with pool.ConnectionPool(proxy.client_dsn, min_size=3) as p:
         p.wait()
