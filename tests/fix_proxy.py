@@ -83,13 +83,7 @@ class Proxy:
         self.proc = sp.Popen(cmdline, stdout=sp.DEVNULL)
         logging.info("proxy started")
         self._wait_listen()
-
-        # verify that the proxy works
-        try:
-            with psycopg.connect(self.client_dsn):
-                pass
-        except Exception as e:
-            pytest.fail(f"failed to create a working proxy: {e}")
+        self._check_connect()
 
     def stop(self):
         if not self.proc:
@@ -116,6 +110,14 @@ class Proxy:
             s.bind((self.client_host, self.client_port))
             s.listen(0)
             yield s
+
+    def _check_connect(self):
+        # verify that the proxy works
+        try:
+            with psycopg.connect(self.client_dsn):
+                pass
+        except Exception as e:
+            pytest.fail(f"failed to create a working proxy: {e}")
 
     @classmethod
     def _get_random_port(cls):
