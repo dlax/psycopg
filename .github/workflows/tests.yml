@@ -161,8 +161,7 @@ jobs:
       PSYCOPG_TEST_DSN: "host=127.0.0.1 user=runner dbname=postgres"
       # MacOS on GitHub Actions seems particularly slow.
       # Don't run timing-based tests as they regularly fail.
-      # pproxy-based tests fail too, with the proxy not coming up in 2s.
-      NOT_MARKERS: "timing proxy mypy"
+      NOT_MARKERS: "timing mypy"
 
     steps:
       - uses: actions/checkout@v4
@@ -214,8 +213,7 @@ jobs:
       PSYCOPG_IMPL: ${{ matrix.impl }}
       DEPS: ./psycopg[test] ./psycopg_pool
       PSYCOPG_TEST_DSN: "host=127.0.0.1 dbname=postgres"
-      # On windows pproxy doesn't seem very happy. Also a few timing test fail.
-      NOT_MARKERS: "timing proxy mypy"
+      NOT_MARKERS: "timing mypy"
 
     defaults:
       run:
